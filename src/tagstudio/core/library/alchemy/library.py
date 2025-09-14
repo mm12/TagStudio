@@ -600,6 +600,20 @@ class Library:
                 )
             )
 
+            session.execute(
+                text("CREATE INDEX IF NOT EXISTS idx_tags_name_shorthand ON tags (name, shorthand)")
+            )
+            session.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_tag_parents_child_id ON tag_parents (child_id)"
+                )
+            )
+            session.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_tag_entries_entry_id ON tag_entries (entry_id)"
+                )
+            )
+
             # Update DB_VERSION
             if loaded_db_version < DB_VERSION:
                 logger.info(f"[Library] Library migrated to DB version {DB_VERSION}")
