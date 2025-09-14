@@ -75,7 +75,6 @@ from tagstudio.core.library.alchemy.constants import (
     DB_VERSION_INITIAL_KEY,
     JSON_FILENAME,
     SQL_FILENAME,
-    TAG_CHILDREN_QUERY,
 )
 from tagstudio.core.library.alchemy.db import make_tables
 from tagstudio.core.library.alchemy.enums import (
