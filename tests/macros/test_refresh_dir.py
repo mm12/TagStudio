@@ -1,7 +1,8 @@
-# SPDX-FileCopyrightText: (c) TagStudio Contributors
-# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2025
+# Licensed under the GPL-3.0 License.
+# Created for TagStudio: https://github.com/CyanVoxel/TagStudio
 
-
+import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -32,6 +33,8 @@ def test_refresh_new_files(library: Library, exclude_mode: bool):
 
 @pytest.mark.parametrize("library", [TemporaryDirectory()], indirect=True)
 def test_refresh_multi_byte_filenames(library: Library):
+    assert shutil.which("rg") is not None
+
     library_dir = unwrap(library.library_dir)
     # Given
     registry = RefreshTracker(library=library)
