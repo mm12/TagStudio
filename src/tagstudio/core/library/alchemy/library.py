@@ -1153,6 +1153,12 @@ class Library:
                 session.query(Entry).where(Entry.id.in_(sub_list)).delete()
             session.commit()
 
+    def entry_count(self) -> int:
+        """Return the total number of entries in the library."""
+        with Session(self.engine) as session:
+            count = session.scalar(select(func.count(Entry.id)))
+            return int(count or 0)
+
     def has_entry_with_path(self, path: Path) -> bool:
         """Check if an entry with this path is in the library."""
         with Session(self.engine) as session:
