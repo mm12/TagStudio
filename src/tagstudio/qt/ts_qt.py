@@ -167,6 +167,9 @@ class QtDriver(DriverMixin, QObject):
     favorite_updated = Signal(bool)
     archived_updated = Signal(bool)
 
+    favorite_updated = Signal(bool)
+    archived_updated = Signal(bool)
+
     tag_manager_panel: PanelModal | None = None
     color_manager_panel: TagColorManager | None = None
     field_template_manager_panel: PanelModal | None = None
