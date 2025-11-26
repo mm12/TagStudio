@@ -183,3 +183,56 @@ Migration from the legacy JSON format is provided via a walkthrough when opening
 
 - Drops `type_key` columns from `text_fields` and `datetime_fields` tables.
 - Enforces column positions for `text_fields` and `datetime_fields` tables.
+
+#### Version 103
+
+| Used From                                | Format | Location                                        |
+| ---------------------------------------- | ------ | ----------------------------------------------- |
+| 71d04254cf87f4200bb7ffc81656e50dfb122e4d | SQLite | `<Library Folder>`/.TagStudio/ts_library.sqlite |
+
+- Applies repairs to the `tag_parents` table created in [version 100](#version-100), removing rows that reference tags that have been deleted.
+
+| Used From                                                                                                        | Format | Location                                        |
+| ---------------------------------------------------------------------------------------------------------------- | ------ | ----------------------------------------------- |
+| 88d0b47a86821ccfadba653f30a515abce5b24b0/[v9.5.7](https://github.com/TagStudioDev/TagStudio/releases/tag/v9.5.7) | SQLite | `<Library Folder>`/.TagStudio/ts_library.sqlite |
+
+- Adds the `is_hidden` column to the `tags` table (default `0`). Used for excluding entries tagged with hidden tags from library searches.
+- Sets the `is_hidden` field on the built-in Archived tag to `1`, to match the Archived tag now being hidden by default.
+
+#### Version 104
+
+| Used From                                | Format | Location                                        |
+| ---------------------------------------- | ------ | ----------------------------------------------- |
+| ad2cbbca483018d245b44348e2c4f5a0e0bb28f1 | SQLite | `<Library Folder>`/.TagStudio/ts_library.sqlite |
+
+- Removes the `preferences` table, after migrating the contained extension list to the .ts_ignore file, if necessary.
+
+---
+
+### Versions 200 - 2xx
+
+#### Version 200
+
+| Used From                                | Format | Location                                        |
+| ---------------------------------------- | ------ | ----------------------------------------------- |
+| c15e2b56eedd0a3c13391fa43571b8f8f7c7a91f | SQLite | `<Library Folder>`/.TagStudio/ts_library.sqlite |
+
+- Adds `text_field_templates` and `date_field_templates` tables.
+- Drops `boolean_fields` and `value_type` tables.
+- Adds `name` columns to `text_fields` and `datetime_fields` tables.
+    - Values in the `name` columns are taken from the `type_key` columns and are changed to "Title Case".
+    - **Example:** "DATE_CREATED" -> "Date Created"
+- Drops `position` columns from `text_fields` and `datetime_fields` tables.
+- Adds `is_multiline` column to `text_fields` table.
+    - Values are set to `TRUE` if the field row was previously a "TEXT_BOX" type.
+- Repairs existing "Description" fields inside the `text_fields` table to have their `is_multiline` column set to `TRUE` _(Previously done in [Version 7](#version-7))_.
+- Repairs existing "Comments" fields inside the `text_fields` table to have their `is_multiline` column set to `TRUE`.
+
+#### Version 201
+
+| Used From                                | Format | Location                                        |
+| ---------------------------------------- | ------ | ----------------------------------------------- |
+| 38da7bb3a920a01d4d70fa065fd19c83ff6eecb1 | SQLite | `<Library Folder>`/.TagStudio/ts_library.sqlite |
+
+- Drops `type_key` columns from `text_fields` and `datetime_fields` tables.
+- Enforces column positions for `text_fields` and `datetime_fields` tables.
