@@ -4,9 +4,9 @@
 # - progress item: show a truncated path or find a way to show the full path without breaking the UI
 # - we likely need additonal checks for `nonModal` to ensure we cannot interact with other windows
 #   in a way that breaks something
-# - when adding fields, they shrink other fields instead of taking from preview box or adding scroll
+# x when adding fields, they shrink other fields instead of taking from preview box or adding scroll
 #   - only when not resized after inital open?
-# - move 'apply even if populated' down
+# - move 'apply even if populated' down?
 # Functionality
 # - exiting while job is running keeps job running?
 # - clean up helpers that throttle UI updates, since they don't seem to work very well.
@@ -16,6 +16,7 @@
 # - make mappings persistent across sessions
 # - add some way to skip populating all of a field if something is absent
 # x warn on non-existing regex key
+# - special field to add exact tag matches?
 # ** 
 from __future__ import annotations
 
@@ -40,6 +41,7 @@ from PySide6.QtWidgets import (
   QPlainTextEdit,
   QProgressBar,
   QPushButton,
+  QScrollArea,
   QSizePolicy,
   QVBoxLayout,
   QWidget,
@@ -539,12 +541,22 @@ class PathsToFieldsModal(QWidget):
 
     # Mappings section
     map_label = QLabel(Translations["paths_to_fields.mappings_label"])
+    # Use a scrollable container for mappings so adding rows doesn't
+    # force other widgets (like the preview) to shrink.
     map_container = QWidget()
     self.map_v = QVBoxLayout(map_container)
     self.map_v.setContentsMargins(0, 0, 0, 0)
     self.map_v.setSpacing(6)
-    # Keep mappings area height fixed to its contents
-    map_container.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+    map_scroll = QScrollArea()
+    map_scroll.setWidgetResizable(True)
+    map_scroll.setWidget(map_container)
+    # Limit the mappings area height so it yields space to the preview; if
+    # mappings exceed this height a scrollbar will appear instead.
+    # Allow mappings to expand vertically to show as many rows as possible
+    # before the preview area grows. Keep a reasonable cap so the preview can
+    # still expand once mappings reach this limit.
+    map_scroll.setMaximumHeight(800)
+    map_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     self.add_map_btn = QPushButton(Translations["paths_to_fields.add_mapping"])
     self.add_map_btn.clicked.connect(self._add_mapping_row)
@@ -611,14 +623,16 @@ class PathsToFieldsModal(QWidget):
     root.addWidget(desc)
     root.addWidget(form)
     root.addWidget(map_label)
-    root.addWidget(map_container)
+    root.addWidget(map_scroll)
     root.addWidget(self.add_map_btn, alignment=Qt.AlignmentFlag.AlignLeft)
     root.addWidget(self.preview_btn, alignment=Qt.AlignmentFlag.AlignLeft)
     root.addWidget(self.progress_container)
     root.addWidget(self.preview_area)
     root.addWidget(self.apply_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
-    # Make only the preview area consume extra vertical space on resize
+    # Prefer to allocate extra vertical space to mappings first, then the
+    # preview. Higher stretch means more space when expanding the window.
+    root.setStretchFactor(map_scroll, 3)
     root.setStretchFactor(self.preview_area, 1)
 
     # Seed one mapping row
