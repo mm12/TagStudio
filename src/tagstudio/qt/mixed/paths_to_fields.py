@@ -11,7 +11,7 @@
 # - exiting while job is running keeps job running?
 # - clean up helpers that throttle UI updates, since they don't seem to work very well.
 # - does the cancel button actually work?
-# - add a mode that only tries to check empty entries, instead of whole library (future, custom?)
+# x add a mode that only tries to check empty entries, instead of whole library (future, custom?)
 # - optimize library search further
 # - make mappings persistent across sessions
 # - add some way to skip populating all of a field if something is absent
@@ -149,6 +149,7 @@ def iter_preview_paths_to_fields(
   only_unset: bool = True,
   *,
   cancel_callback: Callable[[], bool] | None = None,
+  only_entries_without_fields: bool = False,
 ) -> Iterator[PreviewProgress]:
   compiled = [(r, r.compile()) for r in rules]
   try:
@@ -167,6 +168,15 @@ def iter_preview_paths_to_fields(
   for index, entry in enumerate(_iter_entries(library), start=1):
     if cancel_callback and cancel_callback():
       break
+
+    # Optionally skip entries that already have any fields on them
+    if only_entries_without_fields:
+      try:
+        if getattr(entry, "fields", None):
+          # entry.fields is truthy when there is at least one field
+          continue
+      except Exception:
+        pass
 
     try:
       if base_path is not None:
@@ -219,6 +229,8 @@ def preview_paths_to_fields(
   library: Library,
   rules: list[PathFieldRule],
   only_unset: bool = True,
+  *,
+  only_entries_without_fields: bool = False,
 ) -> list[EntryFieldUpdate]:
   """Return a dry-run of field updates inferred from entry paths.
 
@@ -226,7 +238,12 @@ def preview_paths_to_fields(
   - Supports multiple rules; first matching rule contributes its mapped fields.
   """
   results: list[EntryFieldUpdate] = []
-  for progress in iter_preview_paths_to_fields(library, rules, only_unset=only_unset):
+  for progress in iter_preview_paths_to_fields(
+    library,
+    rules,
+    only_unset=only_unset,
+    only_entries_without_fields=only_entries_without_fields,
+  ):
     if progress.update:
       results.append(progress.update)
   return results
@@ -475,10 +492,15 @@ class PathsToFieldsModal(QWidget):
 
     self.filename_only_cb = QCheckBox(Translations["paths_to_fields.use_filename_only"])
     self.allow_existing_cb = QCheckBox(Translations["paths_to_fields.allow_existing"])
+    # Only check entries that have no fields at all
+    self.only_empty_entries_cb = QCheckBox(
+      Translations["paths_to_fields.only_empty_entries"]
+    )
 
     form_layout.addRow(pattern_label, self.pattern_edit)
     form_layout.addRow(self.filename_only_cb)
     form_layout.addRow(self.allow_existing_cb)
+    form_layout.addRow(self.only_empty_entries_cb)
 
     # Ensure the form block doesn't vertically stretch on resize
     form.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
@@ -657,6 +679,7 @@ class PathsToFieldsModal(QWidget):
         rules,
         only_unset=False,
         cancel_callback=lambda: self._cancel_preview,
+        only_entries_without_fields=self.only_empty_entries_cb.isChecked(),
       )
 
     iterator = FunctionIterator(generator)
@@ -681,6 +704,7 @@ class PathsToFieldsModal(QWidget):
       self.library,
       rules,
       only_unset=not allow_existing,
+      only_entries_without_fields=self.only_empty_entries_cb.isChecked(),
     )
     if not previews:
       msg_box = QMessageBox()
