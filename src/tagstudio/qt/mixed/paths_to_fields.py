@@ -10,7 +10,7 @@
 # Functionality
 # - exiting while job is running keeps job running?
 # - clean up helpers that throttle UI updates, since they don't seem to work very well.
-# - does the cancel button actually work?
+# x does the cancel button actually work? NO, we need a cancel while running
 # x add a mode that only tries to check empty entries, instead of whole library (future, custom?)
 # - optimize library search further
 # - make mappings persistent across sessions
@@ -474,6 +474,7 @@ class PathsToFieldsModal(QWidget):
     self._preview_running = False
     self._apply_running = False
     self._cancel_preview = False
+    self._cancel_apply = False
     self._preview_iterator: FunctionIterator | None = None
     self._preview_runnable: CustomRunnable | None = None
     self._apply_iterator: FunctionIterator | None = None
@@ -789,10 +790,11 @@ class PathsToFieldsModal(QWidget):
     total = len(previews)
     self._apply_running = True
     self._set_controls_enabled(enabled=False)
+    self._cancel_apply = False
     self._start_progress(
       label=Translations["paths_to_fields.progress.label.initial"],
       total=total,
-      cancel_handler=None,
+      cancel_handler=self._request_apply_cancel,
     )
 
     def generator():
@@ -849,6 +851,9 @@ class PathsToFieldsModal(QWidget):
     total = len(previews)
     try:
       for index, upd in enumerate(previews, start=1):
+        # allow cancelling an in-progress apply
+        if getattr(self, "_cancel_apply", False):
+          break
         apply_paths_to_fields(
           self.library,
           [upd],
@@ -1023,6 +1028,9 @@ class PathsToFieldsModal(QWidget):
 
   def _request_preview_cancel(self) -> None:
     self._cancel_preview = True
+
+  def _request_apply_cancel(self) -> None:
+    self._cancel_apply = True
 
   def _finalize_preview(self) -> None:
     cancelled = self._cancel_preview
