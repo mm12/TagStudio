@@ -1,10 +1,21 @@
-# TODO list
+# ** TODO list
 # UI bugs
 # - When preview loads, it extends below the apply button, likely because scrollbar isn't calculated
 # - progress item: show a truncated path or find a way to show the full path without breaking the UI
-# Funcionality
+# - we likely need additonal checks for `nonModal` to ensure we cannot interact with other windows
+#   in a way that breaks something
+# - when adding fields, they shrink other fields instead of taking from preview box or adding scroll
+#   - only when not resized after inital open?
+# - move 'apply even if populated' down
+# Functionality
 # - exiting while job is running keeps job running?
 # - clean up helpers that throttle UI updates, since they don't seem to work very well.
+# - does the cancel button actually work?
+# - add a mode that only tries to check empty entries, instead of whole library (future, custom?)
+# - optimize library search further
+# - make mappings persistent across sessions
+# - add some way to skip populating all of a field if something is absent
+# ** 
 from __future__ import annotations
 
 import re
@@ -764,7 +775,7 @@ class PathsToFieldsModal(QWidget):
       # Flag duplicates before generic already_set so we only warn for actual conflicts
       if value in existing_vals and value != "":
         marker = Translations["paths_to_fields.preview.markers.duplicate"]
-        conflict_vals = [value]
+        conflict_vals = [v for v in existing_vals if v == value]
       else:
         already_set = any(val != "" for val in existing_vals)
         marker = (
@@ -776,10 +787,7 @@ class PathsToFieldsModal(QWidget):
       prefix = f"⚠ {marker} — " if marker else ""
       conflict_note = ""
       if marker and conflict_vals:
-        dedup_conflicts: list[str] = []
-        for val in conflict_vals:
-          if val not in dedup_conflicts:
-            dedup_conflicts.append(val)
+        dedup_conflicts = list(dict.fromkeys(conflict_vals))
         conflicts_str = ", ".join(dedup_conflicts)
         if conflicts_str:
           conflict_note = f" (current: {conflicts_str})"
@@ -821,7 +829,7 @@ class PathsToFieldsModal(QWidget):
         self._progress_flush_timer.start(int(self._progress_update_interval * 1000))
       return
     self._last_progress_update = now
-    self._pending_progress = None
+    self._progress_flush_timer.start(round(self._progress_update_interval * 1000))
     if self._progress_flush_timer.isActive():
       self._progress_flush_timer.stop()
 
