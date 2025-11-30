@@ -15,6 +15,7 @@
 # - optimize library search further
 # - make mappings persistent across sessions
 # - add some way to skip populating all of a field if something is absent
+# x warn on non-existing regex key
 # ** 
 from __future__ import annotations
 
@@ -90,6 +91,8 @@ class EntryFieldUpdate:
   path: str
   # list of (field_key, value) to preserve duplicates and order
   updates: list[tuple[str, str]] = field(default_factory=list)
+  # Any warnings related to this update (e.g. missing regex groups)
+  warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -196,6 +199,7 @@ def iter_preview_paths_to_fields(
       )
 
     pending_list: list[tuple[str, str]] = []
+    missing_placeholders: set[str] = set()
 
     skip_keys: set[str] = set()
     if only_unset:
@@ -216,11 +220,38 @@ def iter_preview_paths_to_fields(
         if value == "":
           continue
 
+        # Detect placeholders that reference non-existent regex groups
+        for ph in PLACEHOLDER_RE.finditer(tmpl):
+          if ph.group("i") is not None:
+            try:
+              idx = int(ph.group("i"))
+              if idx < 0 or idx > len(m.groups()):
+                missing_placeholders.add(f"${idx}")
+            except Exception:
+              missing_placeholders.add(f"${ph.group('i')}")
+          else:
+            name = ph.group("n1") or ph.group("n2")
+            if name and name not in m.groupdict():
+              # show as $name for brevity
+              missing_placeholders.add(f"${name}")
+
         pending_list.append((key, value))
 
     update = None
     if pending_list:
-      update = EntryFieldUpdate(entry_id=entry.id, path=full_path, updates=pending_list)
+      warnings: list[str] = []
+      if missing_placeholders:
+        # Create human-friendly warnings
+        for ph_name in sorted(missing_placeholders):
+          warnings.append(
+            Translations.format("paths_to_fields.msg.bad_regex_groups", groups=ph_name)
+          )
+      update = EntryFieldUpdate(
+        entry_id=entry.id,
+        path=full_path,
+        updates=pending_list,
+        warnings=warnings,
+      )
 
     yield PreviewProgress(index=index, total=total, path=full_path, update=update)
 
@@ -628,7 +659,7 @@ class PathsToFieldsModal(QWidget):
       msg_box.exec_()
       return None
     try:
-      re.compile(pattern)
+      cre = re.compile(pattern)
     except re.error as e:
       msg_box = QMessageBox()
       msg_box.setIcon(QMessageBox.Icon.Critical)
@@ -638,6 +669,46 @@ class PathsToFieldsModal(QWidget):
       msg_box.addButton(Translations["generic.close"], QMessageBox.ButtonRole.AcceptRole)
       msg_box.exec_()
       return None
+
+    # Validate that templates don't reference non-existent regex groups.
+    missing_placeholders: set[str] = set()
+    for _, tmpl in fields_list:
+      for ph in PLACEHOLDER_RE.finditer(tmpl):
+        if ph.group("i") is not None:
+          try:
+            idx = int(ph.group("i"))
+            # valid numeric groups are 1..cre.groups
+            if idx < 1 or idx > cre.groups:
+              missing_placeholders.add(f"${idx}")
+          except Exception:
+            missing_placeholders.add(f"${ph.group('i')}")
+        else:
+          name = ph.group("n1") or ph.group("n2")
+          if name and name not in cre.groupindex:
+            missing_placeholders.add(f"${name}")
+
+    if missing_placeholders:
+      msg_box = QMessageBox()
+      msg_box.setIcon(QMessageBox.Icon.Warning)
+      msg_box.setWindowTitle(Translations["paths_to_fields.title"])
+      missing_list = ", ".join(sorted(missing_placeholders))
+      msg_box.setText( # **TODO paths_to_fields.msg.missing_placeholder
+        Translations.format("paths_to_fields.msg.bad_regex_groups", groups=missing_list)
+      )
+      msg_box.setInformativeText(
+        Translations["paths_to_fields.msg.warning_prompt_action"]
+      )
+      cancel_btn = msg_box.addButton(
+        Translations["generic.cancel"],
+        QMessageBox.ButtonRole.RejectRole,
+      )
+      msg_box.addButton(
+        Translations["generic.close"],
+        QMessageBox.ButtonRole.AcceptRole,
+      )
+      msg_box.exec_()
+      if msg_box.clickedButton() is cancel_btn:
+        return None
     rule = PathFieldRule(
       pattern=pattern,
       fields=fields_list,
@@ -791,7 +862,12 @@ class PathsToFieldsModal(QWidget):
         _libmod.logger = _saved_logger
 
   def _append_preview_update(self, upd: EntryFieldUpdate) -> None:
-    lines = [upd.path]
+    lines: list[str] = []
+    # Show any warnings (e.g. missing regex groups) before the entry path
+    if getattr(upd, "warnings", None):
+      for w in upd.warnings:
+        lines.append(f"⚠ {w}")
+    lines.append(upd.path)
     entry = unwrap(self.library.get_entry_full(upd.entry_id))
     for key, value in upd.updates:
       existing_vals = [f.value or "" for f in entry.fields if f.type_key == key]
