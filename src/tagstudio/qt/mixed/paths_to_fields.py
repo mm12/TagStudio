@@ -1,6 +1,6 @@
 # ** TODO list
 # UI bugs
-# - When preview loads, it extends below the apply button, likely because scrollbar isn't calculated
+# x When preview loads, it extends below the apply button, likely because scrollbar isn't calculated
 # - progress item: show a truncated path or find a way to show the full path without breaking the UI
 # - we likely need additonal checks for `nonModal` to ensure we cannot interact with other windows
 #   in a way that breaks something
@@ -569,7 +569,16 @@ class PathsToFieldsModal(QWidget):
     self.preview_area.setFrameShape(QFrame.Shape.StyledPanel)
     self.preview_area.setPlaceholderText(Translations["paths_to_fields.preview_empty"])
     self.preview_area.setMinimumHeight(200)
-    self.preview_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+    # Prevent the preview area from growing indefinitely when content is appended.
+    # Use a preferred vertical size policy so the widget shows a scrollbar instead
+    # of expanding and pushing the Apply button off-screen.
+    self.preview_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+    # Ensure vertical scrollbar appears as needed.
+    self.preview_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    # Prevent the preview area from becoming taller than a reasonable cap
+    # so it won't push or overlap the Apply button when large content is added.
+    # Use a modest default that fits within the dialog's min size.
+    self.preview_area.setMaximumHeight(360)
     self.preview_area.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
 
     self.progress_container = QWidget()
@@ -637,6 +646,30 @@ class PathsToFieldsModal(QWidget):
 
     # Seed one mapping row
     self._add_mapping_row()
+
+    # Ensure preview max height is sensible relative to the dialog size.
+    # This prevents the preview from overlapping the Apply button on small windows.
+    self._update_preview_max_height()
+
+  def resizeEvent(self, event) -> None:  # type: ignore[override]  # noqa: N802
+    super().resizeEvent(event)
+    self._update_preview_max_height()
+
+  def showEvent(self, event) -> None:  # type: ignore[override]  # noqa: N802
+    super().showEvent(event)
+    # Recompute when shown to account for initial layout sizes
+    self._update_preview_max_height()
+
+  def _update_preview_max_height(self) -> None:
+    try:
+      total_h = max(300, self.height())
+      # Reserve some vertical space for other controls (title/desc/form/mappings/buttons)
+      # and allow the preview to occupy up to ~45% of the dialog height.
+      cap = max(160, int(total_h * 0.45))
+      self.preview_area.setMaximumHeight(cap)
+    except Exception:
+      # Be conservative on any error and leave the existing cap alone
+      pass
 
   def _add_mapping_row(self):
     row = _MappingRow()
