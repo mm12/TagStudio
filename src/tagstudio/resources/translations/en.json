@@ -265,6 +265,8 @@
     "paths_to_fields.msg.add_mapping": "Please add at least one field mapping.",
     "paths_to_fields.msg.invalid_regex_title": "Invalid Regex",
     "paths_to_fields.msg.no_matches": "No matches found.",
+    "paths_to_fields.msg.warning_prompt_action": "Do you want to continue? (Continue will ignore these warnings.)",
+    "paths_to_fields.msg.bad_regex_groups": "Templates reference non-existent regex groups: {groups}",
     "paths_to_fields.template_placeholder": "template e.g. $page or example.com/$id",
     "paths_to_fields.title": "Create Fields From Paths",
     "paths_to_fields.use_filename_only": "Use Filename Only",
