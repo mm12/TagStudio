@@ -1,7 +1,7 @@
 # ** TODO list
 # UI bugs
 # x When preview loads, it extends below the apply button, likely because scrollbar isn't calculated
-# - progress item: show a truncated path or find a way to show the full path without breaking the UI
+# x progress item: show a truncated path or find a way to show the full path without breaking the UI
 # - we likely need additonal checks for `nonModal` to ensure we cannot interact with other windows
 #   in a way that breaks something
 # x when adding fields, they shrink other fields instead of taking from preview box or adding scroll
@@ -1013,8 +1013,25 @@ class PathsToFieldsModal(QWidget):
     display_text = progress.path or ""
     if not display_text and force:
       display_text = self._progress_prefix.strip()
+    # Avoid long paths expanding the UI: elide (omit) the middle of very long
+    # paths for display while preserving the full path in a tooltip.
+    if display_text:
+      # Determine available width for the label. If widget isn't laid out
+      # yet, fall back to a reasonable default.
+      avail = self.progress_label.width() or max(400, self.width() - 120)
+      # Reserve a small margin for padding and avoid negative width.
+      elide_width = max(50, avail - 24)
+      elided = self.progress_label.fontMetrics().elidedText(
+        display_text,
+        Qt.TextElideMode.ElideMiddle,
+        elide_width,
+      )
+    else:
+      elided = ""
+
     self.progress_label.setVisible(bool(display_text))
-    self.progress_label.setText(display_text)
+    self.progress_label.setText(elided)
+    # Always expose full path in tooltip for copy/paste or full view.
     self.progress_label.setToolTip(display_text)
 
   def _start_progress(
