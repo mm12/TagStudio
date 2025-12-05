@@ -7,6 +7,7 @@
 # x when adding fields, they shrink other fields instead of taking from preview box or adding scroll
 #   - only when not resized after inital open?
 # - move 'apply even if populated' down?
+#
 # Functionality
 # - exiting while job is running keeps job running?
 # - clean up helpers that throttle UI updates, since they don't seem to work very well.
@@ -17,6 +18,24 @@
 # - add some way to skip populating all of a field if something is absent
 # x warn on non-existing regex key
 # - special field to add exact tag matches?
+#
+# Code Cleanup Ideas
+# - make it generic/reusable
+#   List of core functions that can be used elsewhere:
+#     - Preview/Apply iterator + view
+#     - Entry path search helpers 
+#         - regex input
+#         - empty items only
+#         - untagged items
+#         - skip if populated
+#         - use filename only
+#     - Single mapping row (field selector + value editor)
+#        - we will want more options for this in the future, ie adding a checkbox to the row
+#   What the new path_to_fields.py should contain:
+#      - Calls to show the search helper
+#      - Call to render mapping rows, passing in the 'fields' list
+#      - Calls to get the preview/apply iterators
+#      - Helper for the iterator to call to add the values to the entries
 # ** 
 from __future__ import annotations
 
