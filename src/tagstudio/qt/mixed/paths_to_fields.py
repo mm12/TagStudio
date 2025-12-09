@@ -128,6 +128,9 @@ PLACEHOLDER_RE = re.compile(
   r"\$(?:\{(?P<n1>[A-Za-z_][A-Za-z0-9_]*)\}|(?P<n2>[A-Za-z_][A-Za-z0-9_]*)|(?P<i>\d+))(?P<op>\+\+|--)?"
 )
 
+# Separator used to encode a per-mapping delimiter into the template value
+TAG_DELIM_SEP = "\x1f"
+
 
 def _expand_template(template: str, match: re.Match[str]) -> str:
   def repl(m: re.Match[str]) -> str:
@@ -332,6 +335,55 @@ def apply_paths_to_fields(
       grouped.setdefault(key, []).append(value)
 
     for key, values in grouped.items():
+      # Special-case: apply exact tag matches when mapping uses the TAGS key.
+      # Values are expected to be one or more tag names possibly separated by
+      # whitespace (e.g. "cat dog"). We resolve each name via
+      # `library.get_tag_by_name` and call `library.add_tags_to_entries`.
+      # Only treat the special UI selector value "TAGS" as tag-add instructions.
+      # Avoid matching generic field keys like "tags" which may refer to textual
+      # fields and could otherwise be interpreted as instructions to modify
+      # tags (leading to unexpected removals/changes).
+      if key == "TAGS":
+        # Collect unique tag ids to add for this entry
+        tag_ids: set[int] = set()
+        for v in values:
+          if not v:
+            continue
+          # Decode optional per-mapping delimiter encoded into the value
+          delim = None
+          actual = v
+          if TAG_DELIM_SEP in v:
+            try:
+              delim, actual = v.split(TAG_DELIM_SEP, 1)
+            except Exception:
+              delim = None
+              actual = v
+          # empty delim => whitespace splitting
+          if delim is None or delim == "":
+            parts = [p for p in re.split(r"\s+", actual.strip()) if p]
+          else:
+            parts = [p for p in re.split(re.escape(delim), actual.strip()) if p]
+          # If there are no tokens after splitting, skip this value
+          if not parts:
+            continue
+          for name in parts:
+            try:
+              t = library.get_tag_by_name(name)
+            except Exception:
+              t = None
+            if t is not None:
+              # Tag object should have `id` attribute
+              with suppress(Exception):
+                tag_ids.add(int(t.id))
+        if tag_ids:
+          try:
+            added = library.add_tags_to_entries(upd.entry_id, list(tag_ids))
+            applied += int(added or 0)
+          except Exception:
+            # Best-effort PoC: ignore failures
+            pass
+        # move on to next key
+        continue
       # ensure field type exists if requested
       if create_missing_field_types:
         _ensure_fn = getattr(library, "ensure_value_type", None)
@@ -430,6 +482,10 @@ class _MappingRow(QWidget):
     self.field_select = QComboBox()
     for fid in FieldID:
       self.field_select.addItem(fid.value.name, fid.name)
+    # Proof-of-concept: allow exact tag matching by choosing TAGS
+    # (not part of FieldID) so templates can resolve tag names to actual
+    # tag objects and add them to entries via library APIs.
+    self.field_select.addItem("TAGS", "TAGS")
     # Single-line editor
     self.val_edit_line = QLineEdit()
     self.val_edit_line.setPlaceholderText(Translations["paths_to_fields.template_placeholder"])
@@ -437,11 +493,16 @@ class _MappingRow(QWidget):
     self.val_edit_box = QPlainTextEdit()
     self.val_edit_box.setPlaceholderText(Translations["paths_to_fields.template_placeholder"])
     self.val_edit_box.setFixedHeight(64)
+    # Delimiter input for tag mappings (small, hidden unless TAGS selected)
+    self.delim_edit = QLineEdit()
+    self.delim_edit.setPlaceholderText("delimiter (space)")
+    self.delim_edit.setFixedWidth(48)
     self.remove_btn = QPushButton("-")
     self.remove_btn.setFixedWidth(28)
     layout.addWidget(self.field_select)
     layout.addWidget(self.val_edit_line)
     layout.addWidget(self.val_edit_box)
+    layout.addWidget(self.delim_edit)
     layout.addWidget(self.remove_btn)
 
     # Start with proper editor based on current selection
@@ -459,6 +520,15 @@ class _MappingRow(QWidget):
     if not v:
       return None
     fid_name = self.field_select.currentData()
+    # For TAGS mapping encode the delimiter into the returned value so the
+    # apply step can split correctly per-row. Use a rarely-used separator
+    # character to avoid colliding with normal text.
+    if fid_name == "TAGS":
+      delim = self.delim_edit.text()
+      # empty => use single space as default
+      if delim is None or delim == "":
+        delim = " "
+      return (str(fid_name), f"{delim}{TAG_DELIM_SEP}{v}")
     return (str(fid_name), v)
 
   def _current_value_editor(self) -> QLineEdit | QPlainTextEdit:
@@ -479,6 +549,12 @@ class _MappingRow(QWidget):
     use_box = isinstance(editor, QPlainTextEdit)
     self.val_edit_box.setVisible(use_box)
     self.val_edit_line.setVisible(not use_box)
+    # Show delimiter input only when the special TAGS option is selected
+    try:
+      fid_name = self.field_select.currentData()
+      self.delim_edit.setVisible(fid_name == "TAGS")
+    except Exception:
+      self.delim_edit.setVisible(False)
 
 
 
