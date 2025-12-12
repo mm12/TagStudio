@@ -73,12 +73,15 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
         elif node.type == ConstraintType.Path:
             ilike = False
             glob = False
+            regex = False
 
             # Smartcase check
             if node.value == node.value.lower():
                 ilike = True
             if node.value.startswith("*") or node.value.endswith("*"):
                 glob = True
+            if node.value.startswith("/") or node.value.endswith("/"):
+                regex = True
 
             if ilike and glob:
                 logger.info("ConstraintType.Path", ilike=True, glob=True)
@@ -89,6 +92,12 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
             elif glob:
                 logger.info("ConstraintType.Path", ilike=False, glob=True)
                 return Entry.path.op("GLOB")(node.value)
+            elif regex:
+                # search using raw regex. Unlike the final `else`, we do not turn `\s` into `/s`
+                # remove starting and ending slashes
+                node.value = node.value.strip("/")
+                logger.info("ConstraintType.Path", ilike=False, glob=False, re=node.value)
+                return Entry.path.regexp_match(node.value) 
             else:
                 logger.info(
                     "ConstraintType.Path", ilike=False, glob=False, re=re.escape(node.value)
