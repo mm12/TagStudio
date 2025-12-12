@@ -1636,14 +1636,27 @@ class Library:
 
         return tag
 
-    def get_tag_by_name(self, tag_name: str) -> Tag | None:
+    def get_tag_by_name(self, tag_name: str, cased=True) -> Tag | None:
         with Session(self.engine) as session:
+            tag_name = tag_name.lower() if not cased else tag_name
             statement = (
-                select(Tag)
-                .options(selectinload(Tag.parent_tags), selectinload(Tag.aliases))
-                .outerjoin(TagAlias)
-                .where(or_(Tag.name == tag_name, TagAlias.name == tag_name))
-            )
+                    select(Tag)
+                    .options(selectinload(Tag.parent_tags), selectinload(Tag.aliases))
+                    .outerjoin(TagAlias)
+                    .where(or_(Tag.name == tag_name, TagAlias.name == tag_name))
+                )
+            if not cased: # case insensitive search
+                statement = (
+                    select(Tag)
+                    .options(selectinload(Tag.parent_tags), selectinload(Tag.aliases))
+                    .outerjoin(TagAlias)
+                    .where(
+                        or_(
+                            func.lower(Tag.name) == tag_name, 
+                            func.lower(TagAlias.name) == tag_name
+                        )
+                    )
+                )
 
             tag = session.scalar(statement)
 
@@ -1656,7 +1669,7 @@ class Library:
                 for alias in tag.aliases:
                     session.expunge(alias)
 
-        return tag
+        return tag    
 
     def get_alias(self, tag_id: int, alias_id: int) -> TagAlias | None:
         with Session(self.engine) as session:

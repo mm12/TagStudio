@@ -18,7 +18,9 @@
 # - add some way to skip populating all of a field if something is absent
 # x warn on non-existing regex key
 # - special field to add exact tag matches?
-#
+# - Tags functionality: need a mode to only get new items so it doesnt take forever and stuff, like 
+#   only_empty_entries mode, which doesn't work even if theres no fields at all on tag edits for
+#   some reason
 # Code Cleanup Ideas
 # - make it generic/reusable
 #   List of core functions that can be used elsewhere:
@@ -36,6 +38,7 @@
 #      - Call to render mapping rows, passing in the 'fields' list
 #      - Calls to get the preview/apply iterators
 #      - Helper for the iterator to call to add the values to the entries
+#   TODO: fix case sensitivity in tag matching (as option, default off)
 # ** 
 from __future__ import annotations
 
@@ -177,6 +180,7 @@ def iter_preview_paths_to_fields(
   *,
   cancel_callback: Callable[[], bool] | None = None,
   only_entries_without_fields: bool = False,
+  only_entries_without_tags: bool = False,
 ) -> Iterator[PreviewProgress]:
   compiled = [(r, r.compile()) for r in rules]
   try:
@@ -201,6 +205,14 @@ def iter_preview_paths_to_fields(
       try:
         if getattr(entry, "fields", None):
           # entry.fields is truthy when there is at least one field
+          continue
+      except Exception:
+        pass
+    # Optionally skip entries that already have any tags on them
+    if only_entries_without_tags:
+      try:
+        if getattr(entry, "tags", None):
+          # entry.tags is truthy when there is at least one tag
           continue
       except Exception:
         pass
@@ -286,6 +298,7 @@ def preview_paths_to_fields(
   only_unset: bool = True,
   *,
   only_entries_without_fields: bool = False,
+  only_entries_without_tags: bool = False,
 ) -> list[EntryFieldUpdate]:
   """Return a dry-run of field updates inferred from entry paths.
 
@@ -298,6 +311,7 @@ def preview_paths_to_fields(
     rules,
     only_unset=only_unset,
     only_entries_without_fields=only_entries_without_fields,
+    only_entries_without_tags=only_entries_without_tags,
   ):
     if progress.update:
       results.append(progress.update)
@@ -368,7 +382,7 @@ def apply_paths_to_fields(
             continue
           for name in parts:
             try:
-              t = library.get_tag_by_name(name)
+              t = library.get_tag_by_name(name, cased=False)
             except Exception:
               t = None
             if t is not None:
@@ -623,13 +637,16 @@ class PathsToFieldsModal(QWidget):
     self.allow_existing_cb = QCheckBox(Translations["paths_to_fields.allow_existing"])
     # Only check entries that have no fields at all
     self.only_empty_entries_cb = QCheckBox(
-      Translations["paths_to_fields.only_empty_entries"]
+      Translations["paths_to_fields.exclude_field_populated"]
     )
+    # Only apply to entries that have no tags (untagged/new entries)
+    self.only_untagged_cb = QCheckBox(Translations["paths_to_fields.exclude_tag_populated"])
 
     form_layout.addRow(pattern_label, self.pattern_edit)
     form_layout.addRow(self.filename_only_cb)
     form_layout.addRow(self.allow_existing_cb)
     form_layout.addRow(self.only_empty_entries_cb)
+    form_layout.addRow(self.only_untagged_cb)
 
     # Ensure the form block doesn't vertically stretch on resize
     form.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
@@ -894,6 +911,7 @@ class PathsToFieldsModal(QWidget):
         only_unset=False,
         cancel_callback=lambda: self._cancel_preview,
         only_entries_without_fields=self.only_empty_entries_cb.isChecked(),
+        only_entries_without_tags=self.only_untagged_cb.isChecked(),
       )
 
     iterator = FunctionIterator(generator)
@@ -919,6 +937,7 @@ class PathsToFieldsModal(QWidget):
       rules,
       only_unset=not allow_existing,
       only_entries_without_fields=self.only_empty_entries_cb.isChecked(),
+      only_entries_without_tags=self.only_untagged_cb.isChecked(),
     )
     if not previews:
       msg_box = QMessageBox()
