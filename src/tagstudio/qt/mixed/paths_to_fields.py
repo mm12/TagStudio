@@ -41,6 +41,7 @@
 # ** 
 from __future__ import annotations
 
+import json
 import re
 import time
 from collections.abc import Callable, Iterable, Iterator
@@ -49,7 +50,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QThreadPool, QTimer
-from PySide6.QtGui import QTextOption
+from PySide6.QtGui import QTextOption, QGuiApplication
 from PySide6.QtWidgets import (
   QCheckBox,
   QComboBox,
@@ -544,6 +545,53 @@ class _MappingRow(QWidget):
       return (str(fid_name), f"{delim}{TAG_DELIM_SEP}{v}")
     return (str(fid_name), v)
 
+  def to_dict(self) -> dict | None:
+    """Serialize the mapping row to a simple dict or return None if empty."""
+    editor = self._current_value_editor()
+    v = (
+      editor.toPlainText().strip()
+      if isinstance(editor, QPlainTextEdit)
+      else editor.text().strip()
+    )
+    if not v:
+      return None
+    fid_name = self.field_select.currentData()
+    data: dict = {"field": str(fid_name), "value": v}
+    if fid_name == "TAGS":
+      delim = self.delim_edit.text() or " "
+      data["delimiter"] = delim
+    return data
+
+  def from_dict(self, data: dict) -> None:
+    """Restore the mapping row from a dict produced by `to_dict`.
+
+    Missing keys are ignored; if `field` does not match any combo entry the
+    selection is left unchanged.
+    """
+    try:
+      field_key = data.get("field")
+      if field_key is not None:
+        for i in range(self.field_select.count()):
+          if self.field_select.itemData(i) == field_key:
+            self.field_select.setCurrentIndex(i)
+            break
+      # ensure the correct editor is visible for the selected field
+      self._update_editor_kind()
+      val = data.get("value")
+      if val is not None:
+        editor = self._current_value_editor()
+        if isinstance(editor, QPlainTextEdit):
+          editor.setPlainText(val)
+        else:
+          editor.setText(val)
+      if field_key == "TAGS":
+        delim = data.get("delimiter")
+        if delim is not None:
+          self.delim_edit.setText(delim)
+    except Exception:
+      # Best-effort restore; ignore problems
+      pass
+
   def _current_value_editor(self) -> QLineEdit | QPlainTextEdit:
     # TEXT_BOX => multi-line, else single-line
     try:
@@ -672,6 +720,16 @@ class PathsToFieldsModal(QWidget):
     self.add_map_btn = QPushButton(Translations["paths_to_fields.add_mapping"])
     self.add_map_btn.clicked.connect(self._add_mapping_row)
 
+    # Clipboard import/export buttons for testing macro settings
+    self.export_map_btn = QPushButton(
+      Translations["paths_to_fields.export_mappings"]
+    )
+    self.import_map_btn = QPushButton(
+      Translations["paths_to_fields.import_mappings"]
+    )
+    self.export_map_btn.clicked.connect(self._export_macro_to_clipboard)
+    self.import_map_btn.clicked.connect(self._import_macro_from_clipboard)
+
     # Preview area
     self.preview_btn = QPushButton(Translations["paths_to_fields.preview"])
     self.preview_btn.clicked.connect(self._on_preview)
@@ -744,7 +802,13 @@ class PathsToFieldsModal(QWidget):
     root.addWidget(form)
     root.addWidget(map_label)
     root.addWidget(map_scroll)
-    root.addWidget(self.add_map_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+    # Map controls row (Add / Export / Import)
+    map_btn_row = QHBoxLayout()
+    map_btn_row.setContentsMargins(0, 0, 0, 0)
+    map_btn_row.addWidget(self.add_map_btn)
+    map_btn_row.addWidget(self.export_map_btn)
+    map_btn_row.addWidget(self.import_map_btn)
+    root.addLayout(map_btn_row)
     root.addWidget(self.preview_btn, alignment=Qt.AlignmentFlag.AlignLeft)
     root.addWidget(self.progress_container)
     root.addWidget(self.preview_area)
@@ -786,9 +850,118 @@ class PathsToFieldsModal(QWidget):
     row = _MappingRow()
     row.remove_btn.clicked.connect(lambda: self._remove_row(row))
     self.map_v.addWidget(row)
+    return row
 
   def _remove_row(self, row: _MappingRow):
     row.setParent(None)
+
+  def _export_macro_to_clipboard(self) -> None:
+    """Serialize current settings and copy JSON to the clipboard."""
+    try:
+      data = self.get_macro_settings()
+      text = json.dumps(data, ensure_ascii=False)
+      QGuiApplication.clipboard().setText(text)
+      QMessageBox.information(
+        self,
+        Translations["paths_to_fields.title"],
+        Translations["paths_to_fields.porter.msg.copied"],
+      )
+    except Exception as e:
+      QMessageBox.critical(
+        self,
+        Translations["paths_to_fields.title"],
+        Translations.format("paths_to_fields.porter.msg.export_fail", err=str(e)),
+      )
+  def _import_macro_from_clipboard(self) -> None:
+    """Read JSON from the clipboard and attempt to restore settings."""
+    try:
+      text = QGuiApplication.clipboard().text()
+      if not text or not text.strip():
+        QMessageBox.warning(self, 
+                            Translations["paths_to_fields.title"], 
+                            Translations["paths_to_fields.porter.msg.import_fail.empty"])
+        return
+      payload = json.loads(text)
+      if not isinstance(payload, dict):
+        QMessageBox.warning(
+          self,
+          Translations["paths_to_fields.title"],
+          Translations["paths_to_fields.porter.msg.import_fail.nojson"],
+        )
+        return
+      self.set_macro_settings(payload)
+      QMessageBox.information(
+        self,
+        Translations["paths_to_fields.title"],
+        Translations["paths_to_fields.porter.msg.imported"],
+      )
+    except json.JSONDecodeError as e:
+      QMessageBox.critical(
+        self,
+        Translations["paths_to_fields.title"],
+        Translations.format(
+          "paths_to_fields.porter.msg.import_fail.badjson",
+          err=str(e))
+      )
+    except Exception as e:
+      QMessageBox.critical(
+        self,
+        Translations["paths_to_fields.title"],
+        Translations.format(
+          "paths_to_fields.porter.msg.import_fail.generic",
+          err=str(e)),
+      )
+
+  def get_macro_settings(self) -> dict:
+    """Return a serializable dict representing the modal's current settings."""
+    settings: dict = {}
+    settings["pattern"] = self.pattern_edit.toPlainText().strip()
+    settings["use_filename_only"] = self.filename_only_cb.isChecked()
+    settings["allow_existing"] = self.allow_existing_cb.isChecked()
+    settings["only_empty_entries"] = self.only_empty_entries_cb.isChecked()
+    settings["only_untagged"] = self.only_untagged_cb.isChecked()
+    mappings: list[dict] = []
+    for i in range(self.map_v.count()):
+      w = self.map_v.itemAt(i).widget()
+      if isinstance(w, _MappingRow):
+        d = w.to_dict()
+        if d:
+          mappings.append(d)
+    settings["mappings"] = mappings
+    return settings
+
+  def set_macro_settings(self, data: dict) -> None:
+    """Restore modal state from a dict produced by `get_macro_settings`.
+
+    This performs a best-effort restore and ignores invalid entries.
+    """
+    try:
+      pat = data.get("pattern")
+      if pat is not None:
+        self.pattern_edit.setPlainText(str(pat))
+      self.filename_only_cb.setChecked(bool(data.get("use_filename_only", False)))
+      self.allow_existing_cb.setChecked(bool(data.get("allow_existing", False)))
+      self.only_empty_entries_cb.setChecked(bool(data.get("only_empty_entries", False)))
+      self.only_untagged_cb.setChecked(bool(data.get("only_untagged", False)))
+
+      # Clear existing mapping rows
+      for i in reversed(range(self.map_v.count())):
+        widget = self.map_v.itemAt(i).widget()
+        if widget is not None:
+          widget.setParent(None)
+
+      mappings = data.get("mappings", []) or []
+      for m in mappings:
+        row = self._add_mapping_row()
+        with suppress(Exception):
+          row.from_dict(m)
+
+      # Ensure at least one mapping row exists
+      if self.map_v.count() == 0:
+        self._add_mapping_row()
+    except Exception:
+      # Best-effort restore; ignore any error
+      pass
 
   def _collect_rules(self) -> tuple[list[PathFieldRule], dict[str, FieldTypeEnum]] | None:
     pattern = self.pattern_edit.toPlainText().strip()
