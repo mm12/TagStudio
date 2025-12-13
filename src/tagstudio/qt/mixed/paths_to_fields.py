@@ -38,7 +38,6 @@
 #      - Call to render mapping rows, passing in the 'fields' list
 #      - Calls to get the preview/apply iterators
 #      - Helper for the iterator to call to add the values to the entries
-#   TODO: fix case sensitivity in tag matching (as option, default off)
 # ** 
 from __future__ import annotations
 
