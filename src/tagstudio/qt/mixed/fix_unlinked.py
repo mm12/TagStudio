@@ -34,7 +34,7 @@ class FixUnlinkedEntriesModal(QWidget):
         self.unlinked_count = -1
         self.dupe_count = -1
         self.setWindowTitle(Translations["entries.unlinked.title"])
-        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setWindowModality(Qt.WindowModality.NonModal)
         self.setMinimumSize(400, 300)
         self.root_layout = QVBoxLayout(self)
         self.root_layout.setContentsMargins(6, 6, 6, 6)

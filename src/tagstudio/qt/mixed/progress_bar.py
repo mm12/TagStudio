@@ -35,7 +35,7 @@ class ProgressWidget(QWidget):
         self.setFixedSize(432, 112)
         self.setWindowFlags(self.pb.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint)
         self.setWindowTitle(window_title)
-        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setWindowModality(Qt.WindowModality.NonModal)
 
     def update_label(self, text: str):
         self.pb.setLabelText(text)

@@ -52,7 +52,7 @@ class AboutModal(QWidget):
         pixel_ratio = self.devicePixelRatio()
         self.setStyleSheet("QLabel {color: white}")
 
-        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setWindowModality(Qt.WindowModality.NonModal)
         self.setFixedWidth(600)
         self.setMinimumHeight(600)
         self.setMaximumHeight(900)

@@ -23,7 +23,7 @@ class FixIgnoredEntriesModalView(QWidget):
         self.driver = driver
 
         self.setWindowTitle(Translations["entries.ignored.title"])
-        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setWindowModality(Qt.WindowModality.NonModal)
         self.setMinimumSize(400, 300)
         self.root_layout = QVBoxLayout(self)
         self.root_layout.setContentsMargins(6, 6, 6, 6)
