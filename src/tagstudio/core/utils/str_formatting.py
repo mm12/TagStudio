@@ -4,6 +4,8 @@
 
 import semver
 
+import semver
+
 
 def strip_punctuation(string: str) -> str:
     """Returns a given string stripped of all punctuation characters."""
