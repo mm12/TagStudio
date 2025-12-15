@@ -4,6 +4,9 @@
 
 from __future__ import annotations
 
+import decimal
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING, Any, override
 
 from sqlalchemy import ForeignKey
@@ -70,6 +73,21 @@ class TextField(BaseField):
         return TextField(
             name=self.name, entry_id=entry_id, value=self.value, is_multiline=self.is_multiline
         )
+
+
+class NumberField(BaseField):
+    __tablename__ = "number_fields"
+
+    value: Mapped[decimal.Decimal | None]
+
+    def __key(self):
+        return (self.type, self.value)
+
+    @override
+    def __eq__(self, value: object) -> bool:
+        if isinstance(value, NumberField):
+            return self.__key() == value.__key()
+        raise NotImplementedError
 
 
 class DatetimeField(BaseField):
