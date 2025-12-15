@@ -14,11 +14,11 @@
 # x does the cancel button actually work? NO, we need a cancel while running
 # x add a mode that only tries to check empty entries, instead of whole library (future, custom?)
 # - optimize library search further
-# - make mappings persistent across sessions
+# x make mappings persistent across sessions (import/export for now)
 # - add some way to skip populating all of a field if something is absent
 # x warn on non-existing regex key
-# - special field to add exact tag matches?
-# - Tags functionality: need a mode to only get new items so it doesnt take forever and stuff, like 
+# x special field to add exact tag matches?
+# x Tags functionality: need a mode to only get new items so it doesnt take forever and stuff, like 
 #   only_empty_entries mode, which doesn't work even if theres no fields at all on tag edits for
 #   some reason
 # Code Cleanup Ideas
