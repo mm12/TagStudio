@@ -88,6 +88,13 @@ class FixIgnoredEntriesModal(FixIgnoredEntriesModalView):
         ):
             self.driver.library_info_window.update_cleanup()
 
+    def update_driver_widgets(self):
+        if (
+            hasattr(self.driver, "library_info_window")
+            and self.driver.library_info_window.isVisible()
+        ):
+            self.driver.library_info_window.update_cleanup()
+
     @override
     def showEvent(self, event: QtGui.QShowEvent) -> None:
         self.update_ignored_count()
