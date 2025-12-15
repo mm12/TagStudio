@@ -45,7 +45,7 @@ class AboutModal(QWidget):
             "padding: 2px;"
         )
 
-        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setWindowModality(Qt.WindowModality.NonModal)
         self.setMinimumSize(360, 540)
         self.setMaximumSize(600, 600)
         self.root_layout = QVBoxLayout(self)

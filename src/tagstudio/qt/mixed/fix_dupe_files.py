@@ -35,7 +35,7 @@ class FixDupeFilesModal(QWidget):
         self.count = -1
         self.filename = ""
         self.setWindowTitle(Translations["file.duplicates.fix"])
-        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setWindowModality(Qt.WindowModality.NonModal)
         self.setMinimumSize(400, 300)
         self.root_layout = QVBoxLayout(self)
         self.root_layout.setContentsMargins(6, 6, 6, 6)

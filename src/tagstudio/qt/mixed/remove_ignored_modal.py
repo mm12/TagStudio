@@ -35,7 +35,7 @@ class RemoveIgnoredModal(QWidget):
         self.driver = driver
         self.tracker = tracker
         self.setWindowTitle(Translations["entries.ignored.remove"])
-        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setWindowModality(Qt.WindowModality.NonModal)
         self.setMinimumSize(500, 400)
         self.root_layout = QVBoxLayout(self)
         self.root_layout.setContentsMargins(6, 6, 6, 6)

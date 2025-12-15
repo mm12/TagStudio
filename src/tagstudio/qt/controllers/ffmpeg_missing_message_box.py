@@ -25,7 +25,7 @@ class FfmpegMissingMessageBox(QMessageBox):
         title = Translations.format("dependency.missing.title", dependency=ffmpeg)
         self.setWindowTitle(title)
         self.setIcon(QMessageBox.Icon.Warning)
-        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setWindowModality(Qt.WindowModality.NonModal)
 
         self.setStandardButtons(
             QMessageBox.StandardButton.Help
