@@ -778,17 +778,17 @@ class Library:
                     )
                 )
 
-            start_time = time.time()
+            # start_time = time.time()
             entry = session.scalar(entry_stmt)
             if with_tags:
                 tags = set(session.scalars(tag_stmt))  # pyright: ignore[reportPossiblyUnboundVariable]
-            end_time = time.time()
-            logger.info(
-                f"[Library] Time it took to get entry: "
-                f"{format_timespan(end_time - start_time, max_units=5)}",
-                with_fields=with_fields,
-                with_tags=with_tags,
-            )
+            # end_time = time.time()
+            # logger.info(
+            #     f"[Library] Time it took to get entry: "
+            #     f"{format_timespan(end_time - start_time, max_units=5)}",
+            #     with_fields=with_fields,
+            #     with_tags=with_tags,
+            # )
             if not entry:
                 return None
             session.expunge(entry)

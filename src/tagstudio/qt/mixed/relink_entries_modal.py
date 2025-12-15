@@ -34,3 +34,4 @@ class RelinkUnlinkedEntries(QObject):
         )
         pw.setWindowTitle(Translations["entries.unlinked.relink.title"])
         pw.from_iterable_function(self.tracker.fix_unlinked_entries, displayed_text, self.done.emit)
+        # add a generic.cancel button
