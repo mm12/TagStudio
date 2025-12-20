@@ -501,7 +501,7 @@ class MainWindow(QMainWindow):
 
         if not self.objectName():
             self.setObjectName("MainWindow")
-        self.resize(1316, 740)
+        self.resize(1974, 1110)
 
         self.setup_menu_bar()
 
@@ -666,7 +666,7 @@ class MainWindow(QMainWindow):
         self.setup_entry_list(driver)
         self.setup_preview_panel(driver)
 
-        self.content_splitter.setStretchFactor(0, 1)
+        self.content_splitter.setStretchFactor(1, 10)
         self.content_layout.addWidget(self.content_splitter)
 
         self.central_layout.addLayout(self.content_layout, 10, 0, 1, 1)
