@@ -39,6 +39,7 @@
 #      - Calls to get the preview/apply iterators
 #      - Helper for the iterator to call to add the values to the entries
 # ** 
+
 from __future__ import annotations
 
 import json
@@ -50,7 +51,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QThreadPool, QTimer
-from PySide6.QtGui import QTextOption, QGuiApplication
+from PySide6.QtGui import QGuiApplication, QTextOption
 from PySide6.QtWidgets import (
   QCheckBox,
   QComboBox,
@@ -627,6 +628,7 @@ class PathsToFieldsModal(QWidget):
     self.setWindowTitle(Translations["paths_to_fields.title"])  # fallback shows [key]
     self.setWindowModality(Qt.WindowModality.NonModal) # Fine to use other windows while processing
     self.setMinimumSize(720, 640)
+    self.resize(720, 1200)
 
     self._preview_results: list[EntryFieldUpdate] = []
     self._preview_running = False
