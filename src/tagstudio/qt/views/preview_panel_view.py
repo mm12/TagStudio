@@ -110,7 +110,7 @@ class PreviewPanelView(QWidget):
 
         splitter.addWidget(preview_section)
         splitter.addWidget(info_section)
-        splitter.setStretchFactor(1, 0)
+        splitter.setStretchFactor(1, 2)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
