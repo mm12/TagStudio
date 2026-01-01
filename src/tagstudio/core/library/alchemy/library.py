@@ -380,6 +380,14 @@ class Library:
         else:
             return tag.name
 
+    def get_tag_count(self, tag_id: int) -> int:
+        """Return the number of entries that have the given tag id."""
+        if not self.engine:
+            return 0
+        with Session(self.engine) as session:
+            cnt = session.scalar(select(func.count()).select_from(TagEntry).where(TagEntry.tag_id == tag_id))
+            return int(cnt or 0)
+
     def open_library(self, library_dir: Path, in_memory: bool = False) -> LibraryStatus:
         """Wrapper for open_sqlite_library.
 
