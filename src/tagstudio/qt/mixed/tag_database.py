@@ -4,6 +4,7 @@
 
 
 import structlog
+import contextlib
 from PySide6.QtWidgets import QMessageBox, QPushButton
 
 from tagstudio.core.constants import RESERVED_TAG_END, RESERVED_TAG_START
@@ -21,7 +22,9 @@ logger = structlog.get_logger(__name__)
 # and the possibility of disabling it can therefore be removed
 
 
-class TagDatabasePanel(TagSearchPanel):
+class TagDatabasePanel(TagSearchPanel): 
+    # TODO: Add counts for tags to the view (on the right side) -> BuildTagPanel?
+    # TODO: sort by counts
     def __init__(self, driver, library: Library):
         super().__init__(library, is_tag_chooser=False)
         self.driver = driver
@@ -73,3 +76,75 @@ class TagDatabasePanel(TagSearchPanel):
 
         self.lib.remove_tag(tag.id)
         self.update_tags()
+
+    def update_tags(self, query: str | None = None):
+        """Update the tag list but sort and prioritize by tag usage counts."""
+        logger.info("[TagDatabasePanel] Updating Tags (by count)")
+
+        # Remove the "Create & Add" button if one exists
+        if self.create_button_in_layout and self.scroll_layout.count():
+            self.scroll_layout.takeAt(self.scroll_layout.count() - 1).widget().deleteLater()
+            self.create_button_in_layout = False
+
+        query_lower = "" if not query else query.lower()
+        tag_limit = TagSearchPanel.tag_limit if isinstance(TagSearchPanel.tag_limit, int) else -1
+        tag_results: list[set[Tag]] = self.lib.search_tags(name=query, limit=tag_limit)
+        if self.exclude:
+            tag_results[0] = {t for t in tag_results[0] if t.id not in self.exclude}
+            tag_results[1] = {t for t in tag_results[1] if t.id not in self.exclude}
+
+        results_0 = list(tag_results[0])
+        results_1 = list(tag_results[1])
+
+        # Sort by descending usage count, tie-breaker by name
+        results_0.sort(key=lambda tag: ( -self.lib.get_tag_count(tag.id), tag.name.lower() ))
+        results_1.sort(key=lambda tag: ( -self.lib.get_tag_count(tag.id), tag.name.lower() ))
+
+        raw_results = list(results_0 + results_1)
+
+        priority_results: set[Tag] = set()
+        if query and query.strip():
+            for tag in raw_results:
+                if tag.name.lower().startswith(query_lower):
+                    priority_results.add(tag)
+
+        # Priority results first (sorted by count), then remaining by count
+        priority_sorted = sorted(
+            list(priority_results), key=lambda tag: (-self.lib.get_tag_count(tag.id), len(tag.name))
+        )
+        remaining = [r for r in raw_results if r not in priority_results]
+        remaining_sorted = sorted(
+            remaining, key=lambda tag: (-self.lib.get_tag_count(tag.id), tag.name.lower())
+        )
+        all_results = priority_sorted + remaining_sorted
+
+        if tag_limit > 0:
+            all_results = all_results[:tag_limit]
+
+        if all_results:
+            self.first_tag_id = None
+            self.first_tag_id = all_results[0].id if len(all_results) > 0 else all_results[0].id
+        else:
+            self.first_tag_id = None
+
+        norm_previous = self.previous_limit if self.previous_limit > 0 else len(self.lib.tags)
+        norm_limit = tag_limit if tag_limit > 0 else len(self.lib.tags)
+        range_limit = max(norm_previous, norm_limit)
+        for i in range(0, range_limit):
+            tag = None
+            try:
+                tag = all_results[i]
+            except Exception:
+                tag = None
+            self.set_tag_widget(tag=tag, index=i)
+        self.previous_limit = tag_limit
+
+        # Add back the "Create & Add" button
+        if query and query.strip():
+            cb: QPushButton = self.build_create_button(query)
+            cb.setText(Translations.format("tag.create_add", query=query))
+            with contextlib.suppress(Exception):
+                cb.clicked.disconnect()
+            cb.clicked.connect(lambda: self.create_and_add_tag(query or ""))
+            self.scroll_layout.addWidget(cb)
+            self.create_button_in_layout = True

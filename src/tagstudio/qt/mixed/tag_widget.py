@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, override
 import structlog
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QEnterEvent, QFontMetrics
-from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QVBoxLayout, QWidget, QLabel
 
 from tagstudio.core.library.alchemy.enums import TagColorEnum
 from tagstudio.core.library.alchemy.models import Tag
@@ -168,6 +168,13 @@ class TagWidget(QWidget):
         self.inner_layout.addWidget(self.remove_button)
         self.inner_layout.addStretch(1)
 
+        # Count label (right side)
+        self.count_label = QLabel(self)
+        self.count_label.setObjectName("tagCountLabel")
+        self.count_label.setHidden(True)
+        self.count_label.setStyleSheet("color: rgba(120,120,120,255); font-size: 12px;")
+        self.inner_layout.addWidget(self.count_label)
+
         self.bg_button.setLayout(self.inner_layout)
         self.bg_button.setMinimumSize(44, 22)
 
@@ -267,8 +274,21 @@ class TagWidget(QWidget):
 
         if self.lib:
             self.bg_button.setText(escape_text(self.lib.tag_display_name(tag)))
+            # Show tag usage count if available
+            try:
+                count = None
+                if hasattr(self.lib, "get_tag_count") and tag:
+                    count = self.lib.get_tag_count(tag.id)
+                if count is not None:
+                    self.count_label.setText(str(count))
+                    self.count_label.setHidden(False)
+                else:
+                    self.count_label.setHidden(True)
+            except Exception:
+                self.count_label.setHidden(True)
         else:
             self.bg_button.setText(escape_text(tag.name))
+            self.count_label.setHidden(True)
 
     def set_has_remove(self, has_remove: bool):
         self.has_remove = has_remove
