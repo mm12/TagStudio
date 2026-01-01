@@ -214,7 +214,8 @@ class TagWidget(QWidget):
         )
 
         if self.lib:
-            self.bg_button.setText(escape_text(self.lib.tag_display_name(tag)))
+            display_text = self.lib.tag_display_name(tag)
+            self.bg_button.setText(escape_text(display_text))
             # Show tag usage count if available
             try:
                 count = None
@@ -228,8 +229,30 @@ class TagWidget(QWidget):
             except Exception:
                 self.count_label.setHidden(True)
         else:
-            self.bg_button.setText(escape_text(tag.name))
+            display_text = tag.name
+            self.bg_button.setText(escape_text(display_text))
             self.count_label.setHidden(True)
+
+        # Ensure the button's width accounts for the tag text, the count label,
+        # and the remove button when visible. Measure using font metrics and
+        # widget size hints and set a reasonable minimum width.
+        fm_btn = QFontMetrics(self.bg_button.font())
+        text_width = fm_btn.horizontalAdvance(display_text)
+
+        count_width = 0
+        if not self.count_label.isHidden():
+            count_width = QFontMetrics(self.count_label.font()).horizontalAdvance(self.count_label.text())
+            count_width += 8  # small padding between text and count
+
+        remove_width = 0
+        if not self.remove_button.isHidden():
+            remove_width = self.remove_button.sizeHint().width() + 4
+
+        padding = 20
+        total_width = text_width + count_width + remove_width + padding
+        # Apply as minimum width so layout respects the combined content
+        self.bg_button.setMinimumWidth(total_width)
+        self.bg_button.adjustSize()
 
     def set_has_remove(self, has_remove: bool):
         self.has_remove = has_remove
