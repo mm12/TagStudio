@@ -1328,44 +1328,14 @@ class ThumbRenderer(QObject):
             #     Path("/usr/share/fonts"),
             #     Path("/usr/local/share/fonts"),
             #     Path.home() / ".fonts",
+            # Hardcode Meiryo path on Windows; fall back to PIL default if unavailable.
             font = None
-            # Try loading common Meiryo filenames first (may work if system
-            # font discovery is available). If that fails, search known font
-            # directories for files starting with "Meiryo" and try those.
-            for cand in ("Meiryo.ttc", "Meiryo.ttf"):
-                try:
-                    font = ImageFont.truetype(cand, size=16)
-                    logger.info("Using font for text thumbnail", font=cand)
-                    break
-                except OSError:
-                    continue
-
-            if font is None:
-                search_dirs = (
-                    Path("C:/Windows/Fonts"),
-                    Path("/usr/share/fonts"),
-                    Path("/usr/local/share/fonts"),
-                    Path.home() / ".fonts",
-                )
-                try:
-                    for d in search_dirs:
-                        if not d.exists():
-                            continue
-                        for f in d.rglob("Meiryo*"):
-                            try:
-                                font = ImageFont.truetype(str(f), size=16)
-                                logger.info("Using font for text thumbnail", font=str(f))
-                                break
-                            except OSError:
-                                continue
-                        if font:
-                            break
-                except Exception:
-                    # Ignore filesystem errors during search and fall back
-                    pass
-
-            if font is None:
-                logger.info("Falling back to default font for text thumbnail")
+            meiryo_path = Path("C:/Windows/Fonts/meiryo.ttc")
+            try:
+                font = ImageFont.truetype(str(meiryo_path), size=16)
+                logger.info("Using Meiryo font for text thumbnail", font=str(meiryo_path))
+            except OSError:
+                logger.info("Meiryo not found; falling back to default font for text thumbnail")
                 font = ImageFont.load_default()
 
             draw.text((16, 16), text, fill=fg_color, font=font)
