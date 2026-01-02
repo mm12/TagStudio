@@ -1321,7 +1321,55 @@ class ThumbRenderer(QObject):
                 text = text_file.read(256)
             bg = Image.new("RGB", (256, 256), color=bg_color)
             draw = ImageDraw.Draw(bg)
-            draw.text((16, 16), text, fill=fg_color)
+
+            # Try to use a TrueType font with broad Unicode coverage so
+            # characters in file contents and paths render correctly.
+            # Search common system font directories for likely candidates
+            # (emoji/symbol fonts and broad-coverage fonts).
+            font = None
+            candidates = (
+                "Meiryo.ttc",
+            )
+            search_dirs = (
+                Path("C:/Windows/Fonts"),
+                Path("/usr/share/fonts"),
+                Path("/usr/local/share/fonts"),
+                Path.home() / ".fonts",
+            )
+
+            # First, try loading by font name (works on some systems)
+            for cand in candidates:
+                try:
+                    font = ImageFont.truetype(cand, size=16)
+                    break
+                except OSError:
+                    continue
+
+            # Then search common font directories for matching files
+            if font is None:
+                for cand in candidates:
+                    for d in search_dirs:
+                        try:
+                            if not d.exists():
+                                continue
+                            for f in d.rglob("*"):
+                                if f.name.lower() == cand.lower():
+                                    try:
+                                        font = ImageFont.truetype(str(f), size=16)
+                                        break
+                                    except OSError:
+                                        continue
+                            if font:
+                                break
+                        except Exception:
+                            continue
+                    if font:
+                        break
+
+            if font is None:
+                font = ImageFont.load_default()
+
+            draw.text((16, 16), text, fill=fg_color, font=font)
             im = bg
         except (
             UnidentifiedImageError,
