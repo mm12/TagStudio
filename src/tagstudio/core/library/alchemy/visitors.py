@@ -95,6 +95,7 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
             elif regex:
                 # search using raw regex. Unlike the final `else`, we do not turn `\s` into `/s`
                 # remove starting and ending slashes
+                # BUG: sometimes `glob=False ilike=True` gets used when it shouldn't!
                 node.value = node.value.strip("/")
                 logger.info("ConstraintType.Path", ilike=False, glob=False, re=node.value)
                 return Entry.path.regexp_match(node.value) 
