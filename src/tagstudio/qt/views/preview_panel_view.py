@@ -160,7 +160,7 @@ class PreviewPanelView(QWidget):
 
                 if update_preview:
                     stats: FileAttributeData = self.__thumb.display_file(filepath)
-                    self.__file_attrs.update_stats(filepath, stats)
+                    self.__file_attrs.update_stats(filepath, stats, entry_id=entry_id)
                 self.__file_attrs.update_date_label(filepath)
                 self._fields.update_from_entry(entry_id)
 
