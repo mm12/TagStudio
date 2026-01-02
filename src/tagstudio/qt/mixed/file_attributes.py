@@ -124,7 +124,12 @@ class FileAttributes(QWidget):
             self.date_created_label.setHidden(True)
             self.date_modified_label.setHidden(True)
 
-    def update_stats(self, filepath: Path | None = None, stats: FileAttributeData | None = None):
+    def update_stats(
+        self,
+        filepath: Path | None = None,
+        stats: FileAttributeData | None = None,
+        entry_id: int | None = None,
+    ):
         """Render the panel widgets with the newest data from the Library."""
         if not stats:
             stats = FileAttributeData()
@@ -217,6 +222,14 @@ class FileAttributes(QWidget):
                     stats_label_text += f"  •  {file_size}"
             elif file_size:
                 stats_label_text += file_size
+
+            # Prepend the database entry id for debugging, if provided
+            if entry_id is not None:
+                id_text = f"ID: {entry_id}"
+                if stats_label_text:
+                    stats_label_text = f"{id_text}<br>{stats_label_text}"
+                else:
+                    stats_label_text = id_text
 
             if stats.width is not None and stats.height is not None:
                 stats_label_text = add_newline(stats_label_text)
