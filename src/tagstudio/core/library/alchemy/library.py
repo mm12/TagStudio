@@ -1071,13 +1071,15 @@ class Library:
     def search_tags(self, name: str | None, limit: int = 100) -> list[set[Tag]]:
         """Return a list of Tag records matching the query."""
         with Session(self.engine) as session:
-            query = select(Tag).outerjoin(TagAlias).order_by(func.lower(Tag.name))
+            # Use DISTINCT to ensure tags aren't duplicated by the outerjoin
+            # on aliases. Without DISTINCT the `LIMIT` could be applied to
+            # duplicate rows caused by multiple aliases for the same tag,
+            # causing some tags to be omitted from results.
+            query = select(Tag).outerjoin(TagAlias).distinct().order_by(func.lower(Tag.name))
             query = query.options(
                 selectinload(Tag.parent_tags),
                 selectinload(Tag.aliases),
             )
-            if limit > 0:
-                query = query.limit(limit)
 
             if name:
                 query = query.where(
@@ -1087,6 +1089,9 @@ class Library:
                         TagAlias.name.icontains(name),
                     )
                 )
+
+            if limit > 0:
+                query = query.limit(limit)
 
             direct_tags = set(session.scalars(query))
             ancestor_tag_ids: list[Tag] = []
