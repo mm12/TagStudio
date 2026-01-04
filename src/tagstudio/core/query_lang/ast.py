@@ -15,6 +15,7 @@ class ConstraintType(Enum):
     FileType = 3
     Path = 4
     Special = 5
+    Date = 7
 
     @staticmethod
     def from_string(text: str) -> "ConstraintType | None":
@@ -25,6 +26,7 @@ class ConstraintType(Enum):
             "filetype": ConstraintType.FileType,
             "path": ConstraintType.Path,
             "special": ConstraintType.Special,
+            "date": ConstraintType.Date,
         }.get(text.lower(), None)
 
 
