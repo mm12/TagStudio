@@ -383,7 +383,7 @@ def apply_paths_to_fields(
             continue
           for name in parts:
             try:
-              t = library.get_tag_by_name(name, cased=False)
+              t = library.get_tag_by_name(name, cased=False, check_alternate=True)
             except Exception:
               t = None
             if t is not None:

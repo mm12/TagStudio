@@ -1644,24 +1644,41 @@ class Library:
 
         return tag
 
-    def get_tag_by_name(self, tag_name: str, cased=True) -> Tag | None:
+    def get_tag_by_name(self, tag_name: str, cased=True, check_alternate=False) -> Tag | None:
         with Session(self.engine) as session:
-            tag_name = tag_name.lower() if not cased else tag_name
-            statement = (
-                    select(Tag)
-                    .options(selectinload(Tag.parent_tags), selectinload(Tag.aliases))
-                    .outerjoin(TagAlias)
-                    .where(or_(Tag.name == tag_name, TagAlias.name == tag_name))
-                )
-            if not cased: # case insensitive search
+            tag_name = tag_name if cased else tag_name.lower()
+
+            # Collect alternate names (deduplicated). Ensure case handling
+            name_set: set[str] = {tag_name}
+            if check_alternate:
+                alt = get_alt_tags(tag_name)
+                if alt:
+                    if not cased:
+                        alt = alt.lower()
+                    name_set.add(alt)
+
+            names = list(name_set)
+
+            # Build a single statement that checks Tag.name or TagAlias.name against
+            # the set of names. Use case-insensitive comparisons when requested.
+            base_opts = selectinload(Tag.parent_tags), selectinload(Tag.aliases)
+            if cased:
                 statement = (
                     select(Tag)
-                    .options(selectinload(Tag.parent_tags), selectinload(Tag.aliases))
+                    .options(*base_opts)
+                    .outerjoin(TagAlias)
+                    .where(or_(Tag.name.in_(names), TagAlias.name.in_(names)))
+                )
+            else:
+                lowered = [n.lower() for n in names]
+                statement = (
+                    select(Tag)
+                    .options(*base_opts)
                     .outerjoin(TagAlias)
                     .where(
                         or_(
-                            func.lower(Tag.name) == tag_name, 
-                            func.lower(TagAlias.name) == tag_name
+                            func.lower(Tag.name).in_(lowered),
+                            func.lower(TagAlias.name).in_(lowered),
                         )
                     )
                 )
@@ -2068,3 +2085,74 @@ class Library:
                 session.expunge(result)
 
         return "" if not result else result.name
+
+def safe_string_swap(original_string, A, B):
+    """
+    Safely swaps all occurrences of substring A and substring B 
+    in original_string using a single regex substitution function.
+    
+    Args:
+        original_string (str): The input string.
+        A (str): The first substring to swap.
+        B (str): The second substring to swap.
+        
+    Returns:
+        str: The string with A and B swapped.
+    """
+    
+    # 1. Escape A and B for safe use in a regex pattern
+    # re.escape handles special regex characters like ., *, +, etc.
+    escaped_A = re.escape(A)
+    escaped_B = re.escape(B)
+    
+    # 2. Create the pattern to match either A or B
+    # The pattern (escaped_A|escaped_B) is crucial: it matches either A or B
+    # without matching any part of A inside B, or vice-versa (assuming A and B 
+    # are not substrings of each other, which is generally required for a safe swap).
+    pattern = re.compile(f'({escaped_A}|{escaped_B})')
+
+    def swap_match(match):
+        """
+        Custom function called for every match of the pattern.
+        It returns the opposite value of what was matched.
+        """
+        # match.group(0) is the actual text matched by the pattern (either A or B)
+        matched_text = match.group(0)
+        
+        if matched_text == A:
+            return B
+        elif matched_text == B:
+            return A
+        # Note: An 'else' branch isn't strictly necessary here if A and B are 
+        # the only things the pattern can match, but it adds safety.
+        return matched_text 
+        
+    # 3. Perform the substitution in one pass
+    return pattern.sub(swap_match, original_string)
+
+def get_alt_tags(tag: str) -> str | None:
+    """Return a single alternate tag string or None.
+
+    This helper prefers swapping spaces and underscores when both are
+    present; otherwise it returns the simple swapped form. Returns
+    `None` when no alternate can be produced.
+    """
+    # Swap underscores and spaces when both present
+    if " " in tag and "_" in tag:
+        alt = safe_string_swap(tag, " ", "_")
+        if alt and alt != tag:
+            return alt
+
+    # Replace underscores with spaces
+    if "_" in tag:
+        alt = tag.replace("_", " ")
+        if alt != tag:
+            return alt
+
+    # Replace spaces with underscores
+    if " " in tag:
+        alt = tag.replace(" ", "_")
+        if alt != tag:
+            return alt
+
+    return None
