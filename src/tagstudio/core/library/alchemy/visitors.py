@@ -9,6 +9,7 @@ import structlog
 from sqlalchemy import ColumnElement, and_, distinct, false, func, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.operators import ilike_op
+from datetime import datetime as _dt, timedelta as _timedelta
 
 from tagstudio.core.library.alchemy.constants import TAG_CHILDREN_ID_QUERY
 from tagstudio.core.library.alchemy.joins import TagEntry
@@ -118,6 +119,64 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
         elif node.type == ConstraintType.Special:  # noqa: SIM102 unnecessary once there is a second special constraint
             if node.value.lower() == "untagged":
                 return ~Entry.id.in_(select(Entry.id).join(TagEntry))
+
+        elif node.type == ConstraintType.Date:
+            # Support relative keywords like `week`, `day`, `month`, `year`, `today`
+            v = node.value.strip()
+            low_v = v.lower()
+
+            now = _dt.now()
+
+            if low_v in ("week", "7d", "7days"):
+                cutoff = now - _timedelta(days=7)
+                return Entry.date_added >= cutoff
+            if low_v in ("day", "1d", "today"):
+                if low_v == "today":
+                    start = _dt(now.year, now.month, now.day)
+                    return Entry.date_added >= start
+                cutoff = now - _timedelta(days=1)
+                return Entry.date_added >= cutoff
+            if low_v in ("month", "30d"):
+                cutoff = now - _timedelta(days=30)
+                return Entry.date_added >= cutoff
+            if low_v in ("year", "365d"):
+                cutoff = now - _timedelta(days=365)
+                return Entry.date_added >= cutoff
+
+            # Comparison operators: >, <, >=, <=
+            if v.startswith(">=") or v.startswith("<="):
+                op = v[:2]
+                date_str = v[2:]
+            elif v.startswith(">") or v.startswith("<"):
+                op = v[0]
+                date_str = v[1:]
+            else:
+                op = None
+                date_str = v
+
+            date_str = date_str.strip()
+            # Try parse ISO datetime/date
+            try:
+                parsed = _dt.fromisoformat(date_str)
+            except Exception:
+                # If parsing fails, raise to indicate invalid syntax
+                logger.error("Invalid date format in date constraint", value=node.value)
+                raise NotImplementedError("Invalid date format for date constraint")
+
+            if op is None:
+                # Treat bare date as that calendar day: >= date 00:00 and < next day
+                start = _dt(parsed.year, parsed.month, parsed.day)
+                end = start + _timedelta(days=1)
+                return and_(Entry.date_added >= start, Entry.date_added < end)
+            elif op == ">":
+                return Entry.date_added > parsed
+            elif op == "<":
+                return Entry.date_added < parsed
+            elif op == ">=":
+                return Entry.date_added >= parsed
+            elif op == "<=":
+                return Entry.date_added <= parsed
+
 
         # raise exception if Constraint stays unhandled
         raise NotImplementedError("This type of constraint is not implemented yet")
