@@ -88,7 +88,12 @@ class TagDatabasePanel(TagSearchPanel):
 
         query_lower = "" if not query else query.lower()
         tag_limit = TagSearchPanel.tag_limit if isinstance(TagSearchPanel.tag_limit, int) else -1
-        tag_results: list[set[Tag]] = self.lib.search_tags(name=query, limit=tag_limit)
+        # Fetch all matching tags first, then sort by usage and take the top `tag_limit`.
+        # Previously we fetched only the first N alphabetically, then sorted that
+        # subset by count which caused many high-count tags to be omitted.
+        total_tags = len(self.lib.tags) if hasattr(self.lib, "tags") else -1
+        fetch_limit = total_tags if isinstance(total_tags, int) and total_tags > 0 else -1
+        tag_results: list[set[Tag]] = self.lib.search_tags(name=query, limit=fetch_limit)
         if self.exclude:
             tag_results[0] = {t for t in tag_results[0] if t.id not in self.exclude}
             tag_results[1] = {t for t in tag_results[1] if t.id not in self.exclude}
