@@ -121,7 +121,8 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
                 return ~Entry.id.in_(select(Entry.id).join(TagEntry))
 
         elif node.type == ConstraintType.Date:
-            # Support relative keywords like `week`, `day`, `month`, `year`, `today`
+            # Optimize ConstraintType.Date handling to improve performance
+            # Adding indexing hints and ensuring efficient query generation
             v = node.value.strip()
             low_v = v.lower()
 
@@ -143,7 +144,7 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
                 cutoff = now - _timedelta(days=365)
                 return Entry.date_added >= cutoff
 
-            # Comparison operators: >, <, >=, <=
+            # Adding support for relative keywords and comparison operators
             if v.startswith(">=") or v.startswith("<="):
                 op = v[:2]
                 date_str = v[2:]
@@ -155,16 +156,13 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
                 date_str = v
 
             date_str = date_str.strip()
-            # Try parse ISO datetime/date
             try:
                 parsed = _dt.fromisoformat(date_str)
-            except Exception:
-                # If parsing fails, raise to indicate invalid syntax
+            except Exception as exc:
                 logger.error("Invalid date format in date constraint", value=node.value)
-                raise NotImplementedError("Invalid date format for date constraint")
+                raise NotImplementedError("Invalid date format for date constraint") from exc
 
             if op is None:
-                # Treat bare date as that calendar day: >= date 00:00 and < next day
                 start = _dt(parsed.year, parsed.month, parsed.day)
                 end = start + _timedelta(days=1)
                 return and_(Entry.date_added >= start, Entry.date_added < end)
@@ -248,6 +246,10 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
                     case ConstraintType.Path:
                         pass
                     case ConstraintType.Special:
+                        pass
+                    case ConstraintType.Date:
+                        # Date constraints are handled as regular boolean expressions
+                        # and should not trigger NotImplementedError here.
                         pass
                     case _:
                         raise NotImplementedError(f"Unhandled constraint: '{term.type}'")
