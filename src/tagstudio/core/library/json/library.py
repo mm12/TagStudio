@@ -1285,7 +1285,12 @@ class Library:
             query_words: list[str] = query.split(" ")
             all_tag_terms: list[str] = []
             only_untagged: bool = "untagged" in query or "no tags" in query
-            only_empty: bool = "empty" in query or "no fields" in query
+            # Support special query for entries without any fields
+            only_empty: bool = (
+                "empty" in query
+                or "no fields" in query
+                or "special:empty_fields" in query_words
+            )
             only_missing: bool = "missing" in query or "no file" in query
             allow_adv: bool = "filename:" in query_words
             tag_only: bool = "tag_id:" in query_words

@@ -14,6 +14,7 @@ from datetime import datetime as _dt, timedelta as _timedelta
 from tagstudio.core.library.alchemy.constants import TAG_CHILDREN_ID_QUERY
 from tagstudio.core.library.alchemy.joins import TagEntry
 from tagstudio.core.library.alchemy.models import Entry, Tag, TagAlias
+from tagstudio.core.library.alchemy.fields import TextField, DatetimeField
 from tagstudio.core.media_types import FILETYPE_EQUIVALENTS, MediaCategories
 from tagstudio.core.query_lang.ast import (
     AST,
@@ -117,8 +118,15 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
                 *[Entry.suffix.ilike(ft) for ft in get_filetype_equivalency_list(node.value)]
             )
         elif node.type == ConstraintType.Special:  # noqa: SIM102 unnecessary once there is a second special constraint
-            if node.value.lower() == "untagged":
+            low_v = node.value.lower()
+            if low_v == "untagged":
                 return ~Entry.id.in_(select(Entry.id).join(TagEntry))
+            elif low_v == "empty_fields":
+                # Entries with no attached fields (no text or datetime fields)
+                return and_(
+                    ~Entry.id.in_(select(TextField.entry_id)),
+                    ~Entry.id.in_(select(DatetimeField.entry_id)),
+                )
 
         elif node.type == ConstraintType.Date:
             # Optimize ConstraintType.Date handling to improve performance
