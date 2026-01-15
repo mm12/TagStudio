@@ -1327,6 +1327,7 @@ class QtDriver(DriverMixin, QObject):
                 "tag:",
                 "tag_id:",
                 "special:untagged",
+                "special:empty_fields",
             ]
             self.main_window.search_field_completion_list.setStringList(completion_list)
 

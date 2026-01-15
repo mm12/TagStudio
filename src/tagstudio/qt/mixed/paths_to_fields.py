@@ -182,6 +182,7 @@ def iter_preview_paths_to_fields(
   cancel_callback: Callable[[], bool] | None = None,
   only_entries_without_fields: bool = False,
   only_entries_without_tags: bool = False,
+  ignored_tag_categories: set[str] | None = None,
 ) -> Iterator[PreviewProgress]:
   compiled = [(r, r.compile()) for r in rules]
   try:
@@ -209,14 +210,52 @@ def iter_preview_paths_to_fields(
           continue
       except Exception:
         pass
-    # Optionally skip entries that already have any tags on them
+    # Optionally treat entries with only tags in ignored categories as "untagged"
     if only_entries_without_tags:
       try:
-        if getattr(entry, "tags", None):
-          # entry.tags is truthy when there is at least one tag
-          continue
+        tags_set = getattr(entry, "tags", None)
+        if tags_set:
+          # Build normalized ignore set
+          ignore_input = ignored_tag_categories or set()
+          ignore_set = {
+            s.strip().lower()
+            for s in ignore_input
+            if s and s.strip()
+          }
+          def _tag_in_ignored_categories(tag, _ignore_set: set[str] = ignore_set) -> bool:
+            try:
+              name = getattr(tag, "name", None)
+              is_cat = bool(getattr(tag, "is_category", False))
+              parents = list(getattr(tag, "parent_tags", []) or [])
+              # Direct category tag with matching name
+              if is_cat and isinstance(name, str) and name.strip().lower() in _ignore_set:
+                return True
+              # Belongs to a parent category with matching name
+              for p in parents:
+                try:
+                  p_name = getattr(p, "name", None)
+                  p_is_cat = bool(getattr(p, "is_category", False))
+                  if p_is_cat and isinstance(p_name, str) and p_name.strip().lower() in _ignore_set:
+                    return True
+                except Exception:
+                  continue
+            except Exception:
+              pass
+            return False
+
+          # Remove ignored-category tags to determine if entry is effectively tagged
+          effective_tags = [t for t in tags_set if not _tag_in_ignored_categories(t)]
+          if effective_tags:
+            # Has at least one non-ignored tag: skip
+            continue
+          # else: no tags or only ignored-category tags -> treat as untagged (do not skip)
       except Exception:
-        pass
+        # On any error, fall back to the original behavior
+        try:
+          if getattr(entry, "tags", None):
+            continue
+        except Exception:
+          pass
 
     try:
       if base_path is not None:
@@ -242,7 +281,8 @@ def iter_preview_paths_to_fields(
     if only_unset:
       for f in entry.fields:
         if (f.value or "") != "":
-          skip_keys.add(f.type_key)
+          with suppress(Exception):
+            skip_keys.add(str(getattr(f, "type_key", "")))
 
     for rule, cre in compiled:
       target = entry.filename if rule.use_filename_only else full_path
@@ -300,6 +340,7 @@ def preview_paths_to_fields(
   *,
   only_entries_without_fields: bool = False,
   only_entries_without_tags: bool = False,
+  ignored_tag_categories: set[str] | None = None,
 ) -> list[EntryFieldUpdate]:
   """Return a dry-run of field updates inferred from entry paths.
 
@@ -313,6 +354,7 @@ def preview_paths_to_fields(
     only_unset=only_unset,
     only_entries_without_fields=only_entries_without_fields,
     only_entries_without_tags=only_entries_without_tags,
+    ignored_tag_categories=ignored_tag_categories,
   ):
     if progress.update:
       results.append(progress.update)
@@ -690,12 +732,16 @@ class PathsToFieldsModal(QWidget):
     )
     # Only apply to entries that have no tags (untagged/new entries)
     self.only_untagged_cb = QCheckBox(Translations["paths_to_fields.exclude_tag_populated"])
+    # Optional: ignore tags belonging to these category names when determining "untagged"
+    self.ignore_tag_categories_edit = QLineEdit()
+    self.ignore_tag_categories_edit.setPlaceholderText("ignore categories (comma-separated)")
 
     form_layout.addRow(pattern_label, self.pattern_edit)
     form_layout.addRow(self.filename_only_cb)
     form_layout.addRow(self.allow_existing_cb)
     form_layout.addRow(self.only_empty_entries_cb)
     form_layout.addRow(self.only_untagged_cb)
+    form_layout.addRow(self.ignore_tag_categories_edit)
 
     # Ensure the form block doesn't vertically stretch on resize
     form.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
@@ -922,6 +968,8 @@ class PathsToFieldsModal(QWidget):
     settings["allow_existing"] = self.allow_existing_cb.isChecked()
     settings["only_empty_entries"] = self.only_empty_entries_cb.isChecked()
     settings["only_untagged"] = self.only_untagged_cb.isChecked()
+    # Store ignored tag categories as a comma-separated string
+    settings["ignored_tag_categories"] = self.ignore_tag_categories_edit.text().strip()
     mappings: list[dict] = []
     for i in range(self.map_v.count()):
       w = self.map_v.itemAt(i).widget()
@@ -945,6 +993,11 @@ class PathsToFieldsModal(QWidget):
       self.allow_existing_cb.setChecked(bool(data.get("allow_existing", False)))
       self.only_empty_entries_cb.setChecked(bool(data.get("only_empty_entries", False)))
       self.only_untagged_cb.setChecked(bool(data.get("only_untagged", False)))
+      # Restore ignored tag categories input
+      try:
+        self.ignore_tag_categories_edit.setText(str(data.get("ignored_tag_categories", "")))
+      except Exception:
+        self.ignore_tag_categories_edit.setText("")
 
       # Clear existing mapping rows
       for i in reversed(range(self.map_v.count())):
@@ -1078,6 +1131,10 @@ class PathsToFieldsModal(QWidget):
       cancel_handler=self._request_preview_cancel,
     )
 
+    # Parse ignored categories from input
+    raw_ignored = self.ignore_tag_categories_edit.text() or ""
+    ignored_set = {s.strip() for s in raw_ignored.split(",") if s and s.strip()}
+
     def generator():
       return iter_preview_paths_to_fields(
         self.library,
@@ -1086,6 +1143,7 @@ class PathsToFieldsModal(QWidget):
         cancel_callback=lambda: self._cancel_preview,
         only_entries_without_fields=self.only_empty_entries_cb.isChecked(),
         only_entries_without_tags=self.only_untagged_cb.isChecked(),
+        ignored_tag_categories=ignored_set if ignored_set else None,
       )
 
     iterator = FunctionIterator(generator)
@@ -1106,12 +1164,17 @@ class PathsToFieldsModal(QWidget):
       return
     rules, f_types = r
     allow_existing = self.allow_existing_cb.isChecked()
+    # Parse ignored categories from input
+    raw_ignored = self.ignore_tag_categories_edit.text() or ""
+    ignored_set = {s.strip() for s in raw_ignored.split(",") if s and s.strip()}
+
     previews = preview_paths_to_fields(
       self.library,
       rules,
       only_unset=not allow_existing,
       only_entries_without_fields=self.only_empty_entries_cb.isChecked(),
       only_entries_without_tags=self.only_untagged_cb.isChecked(),
+      ignored_tag_categories=ignored_set if ignored_set else None,
     )
     if not previews:
       msg_box = QMessageBox()
