@@ -10,7 +10,7 @@ import structlog
 from PIL import Image, ImageQt
 from PySide6 import QtCore
 from PySide6.QtCore import QMetaObject, QSize, QStringListModel, Qt
-from PySide6.QtGui import QAction, QPixmap
+from PySide6.QtGui import QAction, QPixmap, QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -357,10 +357,22 @@ class MainMenuBar(QMenuBar):
         # Previous / Next Entry navigation
         self.previous_entry_action = QAction("Previous Entry", self)
         self.previous_entry_action.setEnabled(False)
+        # Shortcuts: comma and left bracket
+        self.previous_entry_action.setShortcuts([
+                QKeySequence(","), 
+                QKeySequence("["),
+                QKeySequence("<"),
+            ])
         self.view_menu.addAction(self.previous_entry_action)
 
         self.next_entry_action = QAction("Next Entry", self)
         self.next_entry_action.setEnabled(False)
+        # Shortcuts: period and right bracket
+        self.next_entry_action.setShortcuts([
+                QKeySequence("."), 
+                QKeySequence("]"),
+                QKeySequence(">"),
+            ])
         self.view_menu.addAction(self.next_entry_action)
 
     def setup_tools_menu(self):
