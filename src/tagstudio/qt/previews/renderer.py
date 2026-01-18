@@ -1355,11 +1355,17 @@ class ThumbRenderer(QObject):
             if QGuiApplication.styleHints().colorScheme() is Qt.ColorScheme.Dark
             else "#111111"
         )
-
+        encoding = None
         try:
             encoding = detect_char_encoding(filepath)
-            with open(filepath, encoding=encoding) as text_file:
-                text = text_file.read(256)
+            try:
+                with open(filepath, encoding=encoding) as text_file:
+                    text = text_file.read(256)
+            except UnicodeDecodeError:
+                # Fallback to utf-8 if detected encoding fails
+                with open(filepath, encoding="utf-8", errors="replace") as text_file:
+                    text = text_file.read(256)
+                encoding = "utf-8 (fallback)"
             bg = Image.new("RGB", (256, 256), color=bg_color)
             draw = ImageDraw.Draw(bg)
 
@@ -1389,7 +1395,12 @@ class ThumbRenderer(QObject):
             OSError,
             FileNotFoundError,
         ) as e:
-            logger.error("Couldn't render thumbnail", filepath=filepath, error=type(e).__name__)
+            logger.error(
+                "Couldn't render thumbnail",
+                filepath=filepath,
+                error=type(e).__name__,
+                charset=encoding,
+            )
         return im
 
     @staticmethod
