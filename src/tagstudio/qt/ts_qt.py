@@ -498,6 +498,15 @@ class QtDriver(DriverMixin, QObject):
             on_increase_thumbnail_size_action
         )
 
+        # Previous / Next entry navigation actions
+        if hasattr(self.main_window.menu_bar, "previous_entry_action"):
+            self.main_window.menu_bar.previous_entry_action.triggered.connect(
+                lambda: self.navigate_selected_entry(-1)
+            )
+        if hasattr(self.main_window.menu_bar, "next_entry_action"):
+            self.main_window.menu_bar.next_entry_action.triggered.connect(
+                lambda: self.navigate_selected_entry(1)
+            )
         # endregion
 
         # region Tools Menu ===========================================================
@@ -854,6 +863,31 @@ class QtDriver(DriverMixin, QObject):
     def clear_select_action_callback(self):
         self.main_window.thumb_layout.clear_selected()
 
+        self.set_select_actions_visibility()
+        self.set_clipboard_menu_viability()
+        self.main_window.preview_panel.set_selection(self.selected)
+
+    def navigate_selected_entry(self, delta: int):
+        """Move the single selection by delta (-1 for previous, +1 for next)."""
+        selected = self.selected
+        if len(selected) != 1:
+            return
+        current_id = selected[0]
+        entry_ids = self.main_window.thumb_layout._entry_ids
+        try:
+            idx = entry_ids.index(current_id)
+        except ValueError:
+            return
+        new_idx = idx + delta
+        if new_idx < 0 or new_idx >= len(entry_ids):
+            return
+        new_id = entry_ids[new_idx]
+
+        # Clear previous selection and select the new entry
+        self.main_window.thumb_layout.clear_selected()
+        self.main_window.thumb_layout.select_entry(new_id)
+
+        # Update UI and preview
         self.set_select_actions_visibility()
         self.set_clipboard_menu_viability()
         self.main_window.preview_panel.set_selection(self.selected)
@@ -1288,6 +1322,30 @@ class QtDriver(DriverMixin, QObject):
             self.main_window.menu_bar.add_tag_to_selected_action.setEnabled(False)
             self.main_window.menu_bar.clear_select_action.setEnabled(False)
             self.main_window.menu_bar.delete_file_action.setEnabled(False)
+
+        # Enable/disable previous/next entry navigation when exactly one item is selected
+        try:
+            prev_action = self.main_window.menu_bar.previous_entry_action
+            next_action = self.main_window.menu_bar.next_entry_action
+        except AttributeError:
+            prev_action = None
+            next_action = None
+
+        if prev_action and next_action:
+            enabled_prev = False
+            enabled_next = False
+            if len(self.selected) == 1 and self.main_window.thumb_layout._entry_ids:
+                try:
+                    cur = self.selected[0]
+                    idx = self.main_window.thumb_layout._entry_ids.index(cur)
+                    enabled_prev = idx > 0
+                    enabled_next = idx < (len(self.main_window.thumb_layout._entry_ids) - 1)
+                except Exception:
+                    enabled_prev = False
+                    enabled_next = False
+
+            prev_action.setEnabled(enabled_prev)
+            next_action.setEnabled(enabled_next)
 
     def update_completions_list(self, text: str) -> None:
         matches = re.search(
