@@ -354,6 +354,15 @@ class MainMenuBar(QMenuBar):
         assign_mnemonics(self.view_menu)
         self.addMenu(self.view_menu)
 
+        # Previous / Next Entry navigation
+        self.previous_entry_action = QAction("Previous Entry", self)
+        self.previous_entry_action.setEnabled(False)
+        self.view_menu.addAction(self.previous_entry_action)
+
+        self.next_entry_action = QAction("Next Entry", self)
+        self.next_entry_action.setEnabled(False)
+        self.view_menu.addAction(self.next_entry_action)
+
     def setup_tools_menu(self):
         self.tools_menu = QMenu(Translations["menu.tools"], self)
 
