@@ -518,3 +518,4 @@ class BuildTagPanel(PanelWidget):
         self.setTabOrder(unwrap(self.panel_save_button), self.aliases_table.cellWidget(0, 1))
         self.name_field.selectAll()
         self.name_field.setFocus()
+        self._set_aliases()
