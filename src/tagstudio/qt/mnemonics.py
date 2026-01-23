@@ -1,9 +1,6 @@
 # SPDX-FileCopyrightText: (c) TagStudio Contributors
 # SPDX-License-Identifier: GPL-3.0-only
 
-
-import re
-
 import structlog
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu
