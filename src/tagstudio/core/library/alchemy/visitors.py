@@ -99,8 +99,19 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
                 # remove starting and ending slashes
                 # BUG: sometimes `glob=False ilike=True` gets used when it shouldn't!
                 node.value = node.value.strip("/")
-                logger.info("ConstraintType.Path", ilike=False, glob=False, re=node.value)
-                return Entry.path.regexp_match(node.value) 
+                # Validate regex to avoid SQLite UDF exceptions from invalid patterns
+                try:
+                    re.compile(node.value)
+                    logger.info("ConstraintType.Path", ilike=False, glob=False, re=node.value)
+                    return Entry.path.regexp_match(node.value)
+                except re.error as exc:
+                    logger.error(
+                        "Invalid regex in path constraint; falling back to substring match",
+                        pattern=node.value,
+                        error=str(exc),
+                    )
+                    # Fallback: substring match (case-insensitive) to avoid hard failure
+                    return ilike_op(Entry.path, f"%{node.value}%")
             else:
                 logger.info(
                     "ConstraintType.Path", ilike=False, glob=False, re=re.escape(node.value)
