@@ -17,6 +17,15 @@ Implementation Steps
 - Collect all distinct tag name tokens from previews and resolve them once
   via library.get_tag_by_name, building a name→id cache used during apply.
 
+2.5 Pre-apply folder/common values
+- When previews indicate shared data at a folder scope, apply those values
+  once for the whole folder (or a batch of entries sharing the same parent)
+  before processing per-file templates. This lets you:
+  - Avoid repeated tag/field resolution and writes for each file in the folder.
+  - Use folder-level values as defaults that per-file templates can override.
+  Implementation note: collect folder keys and values during preview, then
+  perform a single batched write per folder before per-file updates.
+
 3. Pre-create value types
 - Collect distinct field keys from all previews and call ensure/create value
   types in one pass before per-entry writes to avoid repeated ensure calls.
@@ -64,6 +73,9 @@ Quick test checklist
   name and tags added properly.
 - batch_add_field_consistency: ensure batched writes produce identical fields
   and values ordering compared to single-entry behavior.
+ - folder_level_inheritance_test: verify folder-level values applied once and
+   per-file values applied after, matching single-entry behavior but with
+   reduced repeated operations.
 
 Next steps
 
