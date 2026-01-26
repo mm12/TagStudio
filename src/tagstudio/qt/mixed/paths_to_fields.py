@@ -45,6 +45,7 @@ from __future__ import annotations
 import json
 import re
 import time
+import os
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -1246,20 +1247,117 @@ class PathsToFieldsModal(QWidget):
       _saved_logger = _libmod.logger
       _libmod.logger = _NoInfoLogger(_saved_logger)
 
+    # Batch-oriented apply: pre-resolve tags and ensure value types once,
+    # then process previews in chunks. This reduces repeated lookups.
     total = len(previews)
+    batch_size = 200
+
+    # Collect distinct tag names and field keys across all previews
+    tag_names: set[str] = set()
+    value_keys: set[str] = set()
+    for p in previews:
+      for k, v in p.updates:
+        if k == "TAGS":
+          # decode optional delim encoded into value
+          if TAG_DELIM_SEP in v:
+            try:
+              delim, actual = v.split(TAG_DELIM_SEP, 1)
+            except Exception:
+              actual = v
+          else:
+            actual = v
+          parts = [p for p in re.split(r"\s+", actual.strip()) if p]
+          for name in parts:
+            tag_names.add(name)
+        else:
+          value_keys.add(k)
+
+    # Resolve tag names to ids once
+    tag_name_to_id: dict[str, int] = {}
+    for name in sorted(tag_names):
+      try:
+        t = self.library.get_tag_by_name(name, cased=False, check_alternate=True)
+      except Exception:
+        t = None
+      if t is not None:
+        with suppress(Exception):
+          tag_name_to_id[name] = int(t.id)
+
+    # Ensure value types once (best-effort)
+    if value_keys:
+      ensure_fn = getattr(self.library, "ensure_value_type", None)
+      create_fn = getattr(self.library, "create_value_type", None) or getattr(self.library, "add_value_type", None)
+      for key in sorted(value_keys):
+        ftype = FieldTypeEnum.TEXT_LINE
+        if field_types and key in field_types:
+          ftype = field_types[key]
+        try:
+          if callable(ensure_fn):
+            ensure_fn(key, name=None, field_type=ftype)
+          elif callable(create_fn):
+            create_fn(key, name=None, field_type=ftype)
+          else:
+            # fallback to calling get_value_type to raise if missing
+            self.library.get_value_type(key)
+        except Exception:
+          # best-effort: continue
+          pass
+
     try:
-      for index, upd in enumerate(previews, start=1):
-        # allow cancelling an in-progress apply
+      for batch_start in range(0, total, batch_size):
         if getattr(self, "_cancel_apply", False):
           break
-        apply_paths_to_fields(
-          self.library,
-          [upd],
-          create_missing_field_types=True,
-          field_types=field_types,
-          allow_existing=allow_existing,
-        )
-        yield PreviewProgress(index=index, total=total, path=upd.path, update=upd)
+        batch = previews[batch_start : batch_start + batch_size]
+
+        # Group by folder to detect folder-level common tag additions
+        folder_map: dict[str, list[EntryFieldUpdate]] = {}
+        for upd in batch:
+          folder = os.path.dirname(upd.path) if upd.path else ""
+          folder_map.setdefault(folder, []).append(upd)
+
+        # Apply folder-level tag additions in bulk when possible
+        for _folder, ups in folder_map.items():
+          if len(ups) < 2:
+            continue
+          # collect tag ids to add for this folder (union of identical tags across entries)
+          folder_tag_ids: set[int] = set()
+          for u in ups:
+            for k, v in u.updates:
+              if k != "TAGS":
+                continue
+              if TAG_DELIM_SEP in v:
+                try:
+                  delim, actual = v.split(TAG_DELIM_SEP, 1)
+                except Exception:
+                  actual = v
+              else:
+                actual = v
+              parts = [p for p in re.split(r"\s+", actual.strip()) if p]
+              for name in parts:
+                tid = tag_name_to_id.get(name)
+                if tid is not None:
+                  folder_tag_ids.add(tid)
+          if folder_tag_ids:
+            try:
+              entry_ids = [u.entry_id for u in ups]
+              self.library.add_tags_to_entries(entry_ids, list(folder_tag_ids))
+            except Exception:
+              # best-effort bulk add; ignore failures and fallback to per-entry adds
+              pass
+
+        # Now apply per-entry updates (reuse existing logic by calling apply_paths_to_fields for each entry)
+        for i, upd in enumerate(batch, start=batch_start + 1):
+          if getattr(self, "_cancel_apply", False):
+            break
+          with suppress(Exception):
+            apply_paths_to_fields(
+              self.library,
+              [upd],
+              create_missing_field_types=False,
+              field_types=field_types,
+              allow_existing=allow_existing,
+            )
+          yield PreviewProgress(index=i, total=total, path=upd.path, update=upd)
     finally:
       if _saved_logger is not None and _libmod is not None:
         _libmod.logger = _saved_logger
