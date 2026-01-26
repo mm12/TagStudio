@@ -371,6 +371,7 @@ def apply_paths_to_fields(
   overwrite: bool = False,
   field_types: dict[str, FieldTypeEnum] | None = None,
   allow_existing: bool = False,
+  entries_cache: dict[int, Entry] | None = None,
 ) -> int:
   """Apply field updates to entries.
 
@@ -385,7 +386,11 @@ def apply_paths_to_fields(
   applied = 0
 
   for upd in updates:
-    entry = unwrap(library.get_entry_full(upd.entry_id))
+    entry = None
+    if entries_cache is not None:
+      entry = entries_cache.get(upd.entry_id)
+    if entry is None:
+      entry = unwrap(library.get_entry_full(upd.entry_id))
 
     # Group proposed updates by field key to handle duplicates and overwrites deterministically
     grouped: dict[str, list[str]] = {}
@@ -1351,6 +1356,18 @@ class PathsToFieldsModal(QWidget):
               pass
 
         # Apply per-entry updates; reuse `apply_paths_to_fields` per entry
+        # Prefetch entries for this batch and populate the entry cache
+        try:
+          entry_ids = [u.entry_id for u in batch]
+          for e in self.library.get_entries_full(entry_ids):
+            try:
+              self._entry_cache[int(e.id)] = e
+            except Exception:
+              continue
+        except Exception:
+          # best-effort prefetch; continue if it fails
+          pass
+
         for i, upd in enumerate(batch, start=batch_start + 1):
           if getattr(self, "_cancel_apply", False):
             break
@@ -1361,6 +1378,7 @@ class PathsToFieldsModal(QWidget):
               create_missing_field_types=False,
               field_types=field_types,
               allow_existing=allow_existing,
+              entries_cache=self._entry_cache,
             )
           yield PreviewProgress(index=i, total=total, path=upd.path, update=upd)
     finally:
