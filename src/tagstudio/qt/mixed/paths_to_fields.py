@@ -695,6 +695,8 @@ class PathsToFieldsModal(QWidget):
     self._preview_buffer_timer.setSingleShot(True)
     self._preview_buffer_timer.timeout.connect(self._flush_preview_buffer)
     self._preview_buffer_interval_ms = 160
+    # Cache entries fetched during preview/apply to reduce repeated DB calls
+    self._entry_cache: dict[int, Entry] = {}
 
     root = QVBoxLayout(self)
     root.setContentsMargins(8, 8, 8, 8)
@@ -1286,7 +1288,10 @@ class PathsToFieldsModal(QWidget):
     # Ensure value types once (best-effort)
     if value_keys:
       ensure_fn = getattr(self.library, "ensure_value_type", None)
-      create_fn = getattr(self.library, "create_value_type", None) or getattr(self.library, "add_value_type", None)
+      create_fn = (
+        getattr(self.library, "create_value_type", None)
+        or getattr(self.library, "add_value_type", None)
+      )
       for key in sorted(value_keys):
         ftype = FieldTypeEnum.TEXT_LINE
         if field_types and key in field_types:
@@ -1345,7 +1350,7 @@ class PathsToFieldsModal(QWidget):
               # best-effort bulk add; ignore failures and fallback to per-entry adds
               pass
 
-        # Now apply per-entry updates (reuse existing logic by calling apply_paths_to_fields for each entry)
+        # Apply per-entry updates; reuse `apply_paths_to_fields` per entry
         for i, upd in enumerate(batch, start=batch_start + 1):
           if getattr(self, "_cancel_apply", False):
             break
@@ -1369,9 +1374,18 @@ class PathsToFieldsModal(QWidget):
       for w in upd.warnings:
         lines.append(f"⚠ {w}")
     lines.append(upd.path)
-    entry = unwrap(self.library.get_entry_full(upd.entry_id))
+    entry = self._entry_cache.get(upd.entry_id)
+    if entry is None:
+      try:
+        entry = unwrap(self.library.get_entry_full(upd.entry_id))
+      except Exception:
+        entry = None
+      if entry is not None:
+        self._entry_cache[upd.entry_id] = entry
     for key, value in upd.updates:
-      existing_vals = [f.value or "" for f in entry.fields if f.type_key == key]
+      existing_vals = []
+      if entry is not None:
+        existing_vals = [f.value or "" for f in entry.fields if f.type_key == key]
       allow_existing = self.allow_existing_cb.isChecked()
       # Flag duplicates before generic already_set so we only warn for actual conflicts
       if value in existing_vals and value != "":
