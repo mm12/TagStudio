@@ -309,7 +309,9 @@ class FieldContainers(QWidget):
             # Normalize line endings in any text content.
             if not is_mixed:
                 assert isinstance(field.value, str | type(None))
-                text = (field.value or "").replace("\r", "\n")
+                text = (field.value or "").replace("\r\n", "\n")
+                # Ensure consecutive newlines are preserved in the preview
+                # text = text.replace("\n", "\n\n")
             else:
                 text = "<i>Mixed Data</i>"
             title = f"{field.type.name} (Text Box)"
