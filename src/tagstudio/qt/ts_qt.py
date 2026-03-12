@@ -931,8 +931,10 @@ class QtDriver(DriverMixin, QObject):
         new_id = entry_ids[new_idx]
 
         # Clear previous selection and select the new entry
-        self.main_window.thumb_layout.clear_selected()
-        self.main_window.thumb_layout.select_entry(new_id)
+        self.clear_selected()
+        self.select_entry(new_id)
+        self.main_window.thumb_layout.scroll_to(new_id)
+        self.main_window.thumb_layout.update()
 
         # Update UI and preview
         self.set_select_actions_visibility()
