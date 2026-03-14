@@ -35,6 +35,27 @@ else:
 
 logger = structlog.get_logger(__name__)
 
+_DATE_DURATION_PATTERN = re.compile(r"^(?P<amount>\d+)\s*(?P<unit>[a-zA-Z]+)$")
+_DATE_DURATION_UNITS_TO_DAYS: dict[str, int] = {
+    "d": 1,
+    "day": 1,
+    "days": 1,
+    "w": 7,
+    "week": 7,
+    "weeks": 7,
+    "m": 30,
+    "month": 30,
+    "months": 30,
+    "y": 365,
+    "year": 365,
+    "years": 365,
+}
+_DATE_DURATION_UNITS_TO_HOURS: dict[str, int] = {
+    "h": 1,
+    "hour": 1,
+    "hours": 1,
+}
+
 
 def get_filetype_equivalency_list(item: str) -> list[str] | set[str]:
     for s in FILETYPE_EQUIVALENTS:
@@ -140,12 +161,24 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
                 )
 
         elif node.type == ConstraintType.Date:
-            # Optimize ConstraintType.Date handling to improve performance
-            # Adding indexing hints and ensuring efficient query generation
             v = node.value.strip()
             low_v = v.lower()
 
             now = _dt.now()
+
+            # Generic relative durations, e.g. 2d, 2 days, 3w, 1month.
+            duration_match = _DATE_DURATION_PATTERN.fullmatch(low_v)
+            if duration_match is not None:
+                amount = int(duration_match.group("amount"))
+                unit = duration_match.group("unit")
+                if unit in _DATE_DURATION_UNITS_TO_DAYS:
+                    cutoff = now - _timedelta(days=amount * _DATE_DURATION_UNITS_TO_DAYS[unit])
+                    return Entry.date_added >= cutoff
+                if unit in _DATE_DURATION_UNITS_TO_HOURS:
+                    cutoff = now - _timedelta(
+                        hours=amount * _DATE_DURATION_UNITS_TO_HOURS[unit]
+                    )
+                    return Entry.date_added >= cutoff
 
             if low_v in ("week", "7d", "7days"):
                 cutoff = now - _timedelta(days=7)

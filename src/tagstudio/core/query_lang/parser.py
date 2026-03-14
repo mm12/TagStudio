@@ -92,10 +92,12 @@ class Parser:
         return self.next_token.type == TokenType.ULITERAL and self.next_token.value.upper() == "NOT"  # pyright: ignore
 
     def __constraint(self) -> Constraint:
+        explicit_constraint_type: ConstraintType | None = None
         if self.next_token.type == TokenType.CONSTRAINTTYPE:
             constraint = self.__eat(TokenType.CONSTRAINTTYPE).value
             if not isinstance(constraint, ConstraintType):
                 raise self.__syntax_error()
+            explicit_constraint_type = constraint
             self.last_constraint_type = constraint
 
         value = self.__literal()
@@ -111,7 +113,13 @@ class Parser:
 
             self.__eat(TokenType.SBRACKETC)
 
-        return Constraint(self.last_constraint_type, value, properties)
+        out = Constraint(self.last_constraint_type, value, properties)
+
+        # Non-tag constraints are one-shot. Bare literals should default back to tag lookups.
+        if explicit_constraint_type is not None and explicit_constraint_type != ConstraintType.Tag:
+            self.last_constraint_type = ConstraintType.Tag
+
+        return out
 
     def __property(self) -> Property:
         key = self.__eat(TokenType.ULITERAL).value
