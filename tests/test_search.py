@@ -146,3 +146,15 @@ def test_parent_tags(search_library: Library, query: str, count: int):
 def test_syntax(search_library: Library, invalid_query: str):
     with pytest.raises(ParsingError) as e_info:  # noqa: F841  # pyright: ignore[reportUnusedVariable]
         search_library.search_library(BrowsingState.from_search_query(invalid_query), page_size=500)
+
+
+def test_date_constraint_with_following_term_does_not_error(search_library: Library):
+    results = search_library.search_library(
+        BrowsingState.from_search_query("date:day abc"), page_size=500
+    )
+    assert isinstance(results.total_count, int)
+
+
+def test_date_constraint_accepts_generic_relative_duration(search_library: Library):
+    results = search_library.search_library(BrowsingState.from_search_query("date:2d"), page_size=500)
+    assert isinstance(results.total_count, int)
