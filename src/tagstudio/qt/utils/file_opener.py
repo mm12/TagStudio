@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import override
 
 import structlog
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QGuiApplication, QMouseEvent
 from PySide6.QtWidgets import QLabel, QWidget
 
 from tagstudio.core.utils.silent_subprocess import silent_popen  # pyright: ignore
@@ -38,7 +38,8 @@ def open_file(path: str | Path, file_manager: bool = False, windows_start_comman
 
     try:
         if sys.platform == "win32":
-            normpath = str(Path(path).resolve())
+            # Preserve symlink/junction paths instead of resolving to target.
+            normpath = str(Path(path).absolute())
             if file_manager:
                 command_name = "explorer"
                 command_arg = f'/select,"{normpath}"'
@@ -141,6 +142,7 @@ class FileOpenerLabel(QLabel):
             parent (QWidget, optional): The parent widget. Defaults to None.
         """
         self.filepath: Path | None = None
+        self._press_pos: QPoint | None = None
 
         super().__init__(parent)
 
@@ -154,19 +156,37 @@ class FileOpenerLabel(QLabel):
 
     @override
     def mousePressEvent(self, ev: QMouseEvent) -> None:
-        """Handle mouse press events.
+        """Track press position and allow native label selection behavior."""
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self._press_pos = ev.pos()
+        super().mousePressEvent(ev)
+
+    @override
+    def mouseReleaseEvent(self, ev: QMouseEvent) -> None:
+        """Handle mouse release events.
 
         On a left click, open the file in the default file explorer.
         On a right click, show a context menu.
 
         Args:
-            ev (QMouseEvent): The mouse press event.
+            ev (QMouseEvent): The mouse release event.
         """
+        super().mouseReleaseEvent(ev)
+
         if ev.button() == Qt.MouseButton.LeftButton:
-            opener = FileOpenerHelper(unwrap(self.filepath))
-            opener.open_explorer()
+            # Do not open when user dragged to select text.
+            moved = False
+            if self._press_pos is not None:
+                moved = (
+                    (ev.pos() - self._press_pos).manhattanLength()
+                    > QGuiApplication.styleHints().startDragDistance()
+                )
+
+            if not moved and not self.hasSelectedText() and self.filepath is not None:
+                opener = FileOpenerHelper(unwrap(self.filepath))
+                opener.open_explorer()
         elif ev.button() == Qt.MouseButton.RightButton:
             # Show context menu
             pass
-        else:
-            super().mousePressEvent(ev)
+
+        self._press_pos = None
