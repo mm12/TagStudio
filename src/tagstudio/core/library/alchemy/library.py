@@ -33,6 +33,7 @@ from sqlalchemy import (
     Update,
     and_,
     asc,
+    case,
     create_engine,
     delete,
     desc,
@@ -104,6 +105,7 @@ from tagstudio.core.library.alchemy.models import (
 from tagstudio.core.library.alchemy.visitors import SQLBoolExpressionBuilder
 from tagstudio.core.library.ignore import migrate_ext_list
 from tagstudio.core.library.json.library import Library as JsonLibrary
+from tagstudio.core.query_lang.ast import ANDList, AST, Constraint, ConstraintType, Not, ORList
 from tagstudio.core.utils.types import unwrap
 from tagstudio.qt.translations import Translations
 
@@ -1207,6 +1209,58 @@ class Library:
         assert isinstance(search, BrowsingState)
         assert self.library_dir
 
+        def _extract_order_constraint(
+            node: AST | None,
+        ) -> tuple[AST | None, str | None]:
+            if node is None:
+                return None, None
+
+            if isinstance(node, Constraint):
+                if node.type == ConstraintType.Order:
+                    field_key = node.value.strip().strip('"').strip("'")
+                    return None, field_key or None
+                return node, None
+
+            if isinstance(node, ANDList):
+                terms: list[AST] = []
+                order_field: str | None = None
+                for term in node.terms:
+                    filtered, order_candidate = _extract_order_constraint(term)
+                    if filtered is not None:
+                        terms.append(filtered)
+                    if order_candidate:
+                        order_field = order_candidate
+
+                if len(terms) == 0:
+                    return None, order_field
+                if len(terms) == 1:
+                    return terms[0], order_field
+                return ANDList(terms), order_field
+
+            if isinstance(node, ORList):
+                elements: list[AST] = []
+                order_field: str | None = None
+                for element in node.elements:
+                    filtered, order_candidate = _extract_order_constraint(element)
+                    if filtered is not None:
+                        elements.append(filtered)
+                    if order_candidate:
+                        order_field = order_candidate
+
+                if len(elements) == 0:
+                    return None, order_field
+                if len(elements) == 1:
+                    return elements[0], order_field
+                return ORList(elements), order_field
+
+            if isinstance(node, Not):
+                filtered, order_field = _extract_order_constraint(node.child)
+                if filtered is None:
+                    return None, order_field
+                return Not(filtered), order_field
+
+            return node, None
+
         with Session(unwrap(self.engine), expire_on_commit=False) as session:
             if page_size:
                 statement = (
@@ -1218,13 +1272,14 @@ class Library:
                 statement = select(Entry.id)
 
             ast = search.ast
+            filter_ast, order_field_key = _extract_order_constraint(ast)
 
             if not search.show_hidden_entries:
                 statement = statement.where(~Entry.tags.any(Tag.is_hidden))
 
-            if ast:
+            if filter_ast:
                 start_time = time.time()
-                statement = statement.where(SQLBoolExpressionBuilder(self).visit(ast))
+                statement = statement.where(SQLBoolExpressionBuilder(self).visit(filter_ast))
                 end_time = time.time()
                 logger.info(
                     f"SQL Expression Builder finished ({format_timespan(end_time - start_time)})"
@@ -1242,6 +1297,71 @@ class Library:
                     sort_on = func.lower(Entry.path)
                 case SortingModeEnum.RANDOM:
                     sort_on = func.sin(Entry.id * search.random_seed)
+
+            resolved_order_field_key: str | None = None
+            if order_field_key:
+                normalized_order_key = order_field_key.strip().lower()
+                if normalized_order_key:
+                    order_key_stmt = select(ValueType.key).where(
+                        or_(
+                            func.lower(ValueType.key) == normalized_order_key,
+                            func.lower(ValueType.name) == normalized_order_key,
+                            func.lower(func.replace(ValueType.name, " ", "_"))
+                            == normalized_order_key,
+                        )
+                    )
+                    resolved_order_field_key = session.scalar(order_key_stmt)
+
+            if resolved_order_field_key:
+                text_order_subquery = (
+                    select(
+                        TextField.entry_id.label("entry_id"),
+                        func.min(func.lower(func.trim(TextField.value))).label("order_value"),
+                    )
+                    .where(
+                        and_(
+                            TextField.type_key == resolved_order_field_key,
+                            TextField.value.is_not(None),
+                            func.trim(TextField.value) != "",
+                        )
+                    )
+                    .group_by(TextField.entry_id)
+                    .subquery()
+                )
+                datetime_order_subquery = (
+                    select(
+                        DatetimeField.entry_id.label("entry_id"),
+                        func.min(func.lower(func.trim(DatetimeField.value))).label("order_value"),
+                    )
+                    .where(
+                        and_(
+                            DatetimeField.type_key == resolved_order_field_key,
+                            DatetimeField.value.is_not(None),
+                            func.trim(DatetimeField.value) != "",
+                        )
+                    )
+                    .group_by(DatetimeField.entry_id)
+                    .subquery()
+                )
+
+                statement = statement.outerjoin(
+                    text_order_subquery, text_order_subquery.c.entry_id == Entry.id
+                )
+                statement = statement.outerjoin(
+                    datetime_order_subquery, datetime_order_subquery.c.entry_id == Entry.id
+                )
+
+                order_value = func.coalesce(
+                    text_order_subquery.c.order_value,
+                    datetime_order_subquery.c.order_value,
+                )
+                has_order_value = order_value.is_not(None)
+
+                # Entries with values for the requested order field are sorted first.
+                statement = statement.order_by(case((has_order_value, 0), else_=1))
+                statement = statement.order_by(
+                    asc(order_value) if search.ascending else desc(order_value)
+                )
 
             statement = statement.order_by(asc(sort_on) if search.ascending else desc(sort_on))
 
