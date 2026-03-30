@@ -43,9 +43,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
-import os
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -70,6 +70,8 @@ from PySide6.QtWidgets import (
   QVBoxLayout,
   QWidget,
 )
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from tagstudio.core.library.alchemy.enums import FieldTypeEnum
 from tagstudio.core.library.alchemy.fields import FieldID
@@ -175,6 +177,65 @@ def _iter_entries(library: Library) -> Iterable[Entry]:
   # with_joins=True ensures we can inspect current fields when needed
   yield from library.all_entries(with_joins=True)
 
+
+def _iter_filtered_entry_ids(
+  library: Library,
+  *,
+  only_entries_without_fields: bool,
+  only_entries_without_tags: bool,
+  ignored_tag_categories: set[str] | None,
+) -> Iterator[int]:
+  """Yield candidate entry IDs using DB-side predicates when possible."""
+  with Session(library.engine) as session:
+    stmt = select(Entry.id)
+
+    if only_entries_without_fields:
+      stmt = stmt.where(~Entry.text_fields.any(), ~Entry.datetime_fields.any())
+
+    # If ignored categories are present we keep tag filtering in Python to
+    # preserve existing semantics ("untagged" includes entries with only
+    # ignored-category tags).
+    if only_entries_without_tags and not ignored_tag_categories:
+      stmt = stmt.where(~Entry.tags.any())
+
+    stmt = stmt.order_by(Entry.id)
+    for entry_id in session.scalars(stmt):
+      with suppress(Exception):
+        yield int(entry_id)
+
+
+def _iter_entries_for_preview(
+  library: Library,
+  *,
+  only_entries_without_fields: bool,
+  only_entries_without_tags: bool,
+  ignored_tag_categories: set[str] | None,
+) -> Iterable[Entry]:
+  """Iterate entries, using DB prefiltering to avoid full-library scans."""
+  can_prefilter = (
+    only_entries_without_fields
+    or (only_entries_without_tags and not ignored_tag_categories)
+  )
+  if not can_prefilter:
+    yield from _iter_entries(library)
+    return
+
+  batch: list[int] = []
+  batch_size = 500
+  for entry_id in _iter_filtered_entry_ids(
+    library,
+    only_entries_without_fields=only_entries_without_fields,
+    only_entries_without_tags=only_entries_without_tags,
+    ignored_tag_categories=ignored_tag_categories,
+  ):
+    batch.append(entry_id)
+    if len(batch) >= batch_size:
+      yield from library.get_entries_full(batch)
+      batch.clear()
+
+  if batch:
+    yield from library.get_entries_full(batch)
+
 def iter_preview_paths_to_fields(
   library: Library,
   rules: list[PathFieldRule],
@@ -199,7 +260,15 @@ def iter_preview_paths_to_fields(
   except Exception:
     base_path = None
 
-  for index, entry in enumerate(_iter_entries(library), start=1):
+  for index, entry in enumerate(
+    _iter_entries_for_preview(
+      library,
+      only_entries_without_fields=only_entries_without_fields,
+      only_entries_without_tags=only_entries_without_tags,
+      ignored_tag_categories=ignored_tag_categories,
+    ),
+    start=1,
+  ):
     if cancel_callback and cancel_callback():
       break
 
@@ -702,6 +771,7 @@ class PathsToFieldsModal(QWidget):
     self._preview_buffer_interval_ms = 160
     # Cache entries fetched during preview/apply to reduce repeated DB calls
     self._entry_cache: dict[int, Entry] = {}
+    self._apply_match_count = 0
 
     root = QVBoxLayout(self)
     root.setContentsMargins(8, 8, 8, 8)
@@ -1176,25 +1246,13 @@ class PathsToFieldsModal(QWidget):
     raw_ignored = self.ignore_tag_categories_edit.text() or ""
     ignored_set = {s.strip() for s in raw_ignored.split(",") if s and s.strip()}
 
-    previews = preview_paths_to_fields(
-      self.library,
-      rules,
-      only_unset=not allow_existing,
-      only_entries_without_fields=self.only_empty_entries_cb.isChecked(),
-      only_entries_without_tags=self.only_untagged_cb.isChecked(),
-      ignored_tag_categories=ignored_set if ignored_set else None,
-    )
-    if not previews:
-      msg_box = QMessageBox()
-      msg_box.setIcon(QMessageBox.Icon.Information)
-      msg_box.setWindowTitle(Translations["paths_to_fields.title"])  # use modal title
-      msg_box.setText(Translations["paths_to_fields.msg.no_matches"])
-      msg_box.addButton(Translations["generic.close"], QMessageBox.ButtonRole.AcceptRole)
-      msg_box.exec_()
-      return
+    try:
+      total = self.library.entry_count()
+    except Exception:
+      total = None
 
-    total = len(previews)
     self._apply_running = True
+    self._apply_match_count = 0
     self._set_controls_enabled(enabled=False)
     self._cancel_apply = False
     self._start_progress(
@@ -1204,7 +1262,12 @@ class PathsToFieldsModal(QWidget):
     )
 
     def generator():
-      return self._iter_apply_updates(previews, f_types, allow_existing)
+      return self._iter_apply_with_prepare(
+        rules,
+        f_types,
+        allow_existing,
+        ignored_set if ignored_set else None,
+      )
 
     iterator = FunctionIterator(generator)
     iterator.value.connect(self._handle_apply_progress)
@@ -1215,6 +1278,47 @@ class PathsToFieldsModal(QWidget):
     self._apply_iterator = iterator
     self._apply_runnable = runnable
     QThreadPool.globalInstance().start(runnable)
+
+  def _iter_apply_with_prepare(
+    self,
+    rules: list[PathFieldRule],
+    field_types: dict[str, FieldTypeEnum],
+    allow_existing: bool,
+    ignored_tag_categories: set[str] | None,
+  ) -> Iterator[PreviewProgress]:
+    previews: list[EntryFieldUpdate] = []
+
+    for progress in iter_preview_paths_to_fields(
+      self.library,
+      rules,
+      only_unset=not allow_existing,
+      cancel_callback=lambda: self._cancel_apply,
+      only_entries_without_fields=self.only_empty_entries_cb.isChecked(),
+      only_entries_without_tags=self.only_untagged_cb.isChecked(),
+      ignored_tag_categories=ignored_tag_categories,
+    ):
+      if self._cancel_apply:
+        break
+      if progress.update:
+        previews.append(progress.update)
+      # Keep the UI responsive and show preparation progress immediately.
+      yield PreviewProgress(
+        index=progress.index,
+        total=progress.total,
+        path=progress.path,
+        update=None,
+      )
+
+    if self._cancel_apply:
+      return
+
+    self._apply_match_count = len(previews)
+    if not previews:
+      return
+
+    # Reset progress denominator from library-scan count to apply count.
+    yield PreviewProgress(index=0, total=len(previews), path="", update=None)
+    yield from self._iter_apply_updates(previews, field_types, allow_existing)
 
   def _iter_apply_updates(
     self,
@@ -1598,6 +1702,17 @@ class PathsToFieldsModal(QWidget):
     self._flush_preview_buffer()
     self._finish_progress()
     self._set_controls_enabled(enabled=True)
+    if self._apply_match_count == 0 and not self._cancel_apply:
+      msg_box = QMessageBox()
+      msg_box.setIcon(QMessageBox.Icon.Information)
+      msg_box.setWindowTitle(Translations["paths_to_fields.title"])
+      msg_box.setText(Translations["paths_to_fields.msg.no_matches"])
+      msg_box.addButton(Translations["generic.close"], QMessageBox.ButtonRole.AcceptRole)
+      msg_box.exec_()
+      self._cancel_apply = False
+      return
+    self._apply_match_count = 0
+    self._cancel_apply = False
     self.close()
     with suppress(Exception):
       self.driver.main_window.preview_panel.set_selection(
