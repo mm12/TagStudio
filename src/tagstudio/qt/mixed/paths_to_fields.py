@@ -72,12 +72,12 @@ from PySide6.QtWidgets import (
   QWidget,
 )
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from tagstudio.core.library.alchemy.enums import FieldTypeEnum
 from tagstudio.core.library.alchemy.fields import FieldID
 from tagstudio.core.library.alchemy.library import Library
-from tagstudio.core.library.alchemy.models import Entry, Tag
+from tagstudio.core.library.alchemy.models import Entry
 from tagstudio.core.utils.types import unwrap
 from tagstudio.qt.translations import Translations
 from tagstudio.qt.utils.custom_runnable import CustomRunnable
@@ -204,57 +204,6 @@ def _iter_entries(library: Library) -> Iterable[Entry]:
     yield from library.get_entries_full(batch_ids)
 
 
-def _iter_prefiltered_entries(
-  library: Library,
-  *,
-  only_entries_without_fields: bool,
-  only_entries_without_tags: bool,
-  ignored_tag_categories: set[str] | None,
-) -> Iterator[Entry]:
-  """Stream candidate entries using DB-side predicates when possible."""
-  load_tags = only_entries_without_tags and bool(ignored_tag_categories)
-  opts = [
-    selectinload(Entry.text_fields),
-    selectinload(Entry.datetime_fields),
-  ]
-  if load_tags:
-    opts.append(selectinload(Entry.tags).options(selectinload(Tag.parent_tags)))
-
-  with Session(library.engine) as session:
-    stmt = select(Entry).options(*opts)
-
-    if only_entries_without_fields:
-      stmt = stmt.where(~Entry.text_fields.any(), ~Entry.datetime_fields.any())
-
-    # If ignored categories are present we keep tag filtering in Python to
-    # preserve existing semantics ("untagged" includes entries with only
-    # ignored-category tags).
-    if only_entries_without_tags and not ignored_tag_categories:
-      stmt = stmt.where(~Entry.tags.any())
-
-    stmt = stmt.order_by(Entry.id)
-    entries = session.scalars(stmt)
-    for entry in entries:
-      yield entry
-      session.expunge(entry)
-
-
-def _iter_entries_for_preview(
-  library: Library,
-  *,
-  only_entries_without_fields: bool,
-  only_entries_without_tags: bool,
-  ignored_tag_categories: set[str] | None,
-) -> Iterable[Entry]:
-  """Iterate entries for preview/apply preparation.
-
-  NOTE: DB-side prefiltering is currently disabled due branch regressions
-  causing pathological stalls on some libraries. Keep Python-side filtering
-  so macro processing starts reliably.
-  """
-  _ = (only_entries_without_fields, only_entries_without_tags, ignored_tag_categories)
-  yield from _iter_entries(library)
-
 def iter_preview_paths_to_fields(
   library: Library,
   rules: list[PathFieldRule],
@@ -322,12 +271,7 @@ def iter_preview_paths_to_fields(
     base_path = None
 
   for index, entry in enumerate(
-    _iter_entries_for_preview(
-      library,
-      only_entries_without_fields=only_entries_without_fields,
-      only_entries_without_tags=only_entries_without_tags,
-      ignored_tag_categories=ignored_tag_categories,
-    ),
+    _iter_entries(library),
     start=1,
   ):
     if cancel_callback and cancel_callback():
