@@ -11,7 +11,7 @@ import pytest
 import structlog
 
 from tagstudio.core.enums import DefaultEnum, LibraryPrefs
-from tagstudio.core.library.alchemy.enums import BrowsingState
+from tagstudio.core.library.alchemy.enums import BrowsingState, SortingModeEnum
 from tagstudio.core.library.alchemy.fields import (
     FieldID,  # pyright: ignore[reportPrivateUsage]
     TextField,
@@ -197,6 +197,39 @@ def test_search_library_case_insensitive(library: Library):
     assert len(results) == 1
 
     assert results[0] == entry.id
+
+
+def test_search_library_order_by_field_with_fallback(library: Library):
+    folder = unwrap(library.folder)
+
+    # Add a third entry without a populated title to validate fallback ordering.
+    assert library.add_entries([Entry(path=Path("aaa.txt"), folder=folder, fields=library.default_fields)])
+
+    entry = unwrap(library.get_entry_full(2))
+    title_field = next(field for field in entry.text_fields if field.type_key.lower() == "title")
+    library.update_entry_field(entry_ids=2, field=title_field, content="mango")
+
+    state = (
+        BrowsingState.from_search_query("order:title")
+        .with_sorting_mode(SortingModeEnum.FILE_NAME)
+        .with_sorting_direction(True)
+    )
+
+    results = library.search_library(state, page_size=500)
+
+    # Populated `title` should sort first; missing titles should follow default filename ordering.
+    assert results.ids == [2, 3, 1]
+
+
+def test_search_library_order_unknown_field_uses_default_sort(library: Library):
+    state = (
+        BrowsingState.from_search_query("order:not_a_real_field")
+        .with_sorting_mode(SortingModeEnum.FILE_NAME)
+        .with_sorting_direction(True)
+    )
+
+    results = library.search_library(state, page_size=500)
+    assert results.ids == [2, 1]
 
 
 def test_preferences(library: Library):

@@ -1399,7 +1399,8 @@ class QtDriver(DriverMixin, QObject):
 
     def update_completions_list(self, text: str) -> None:
         matches = re.search(
-            r"((?:.* )?)(mediatype|filetype|path|tag|tag_id):(\"?[A-Za-z0-9\ \t]+\"?)?", text
+            r"((?:.* )?)(mediatype|filetype|path|tag|tag_id|order):(\"?[A-Za-z0-9_\ \t-]+\"?)?",
+            text,
         )
 
         completion_list: list[str] = []
@@ -1410,6 +1411,7 @@ class QtDriver(DriverMixin, QObject):
                 "path:",
                 "tag:",
                 "tag_id:",
+                "order:",
                 "special:untagged",
                 "special:empty_fields",
             ]

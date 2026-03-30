@@ -15,6 +15,7 @@ class ConstraintType(Enum):
     FileType = 3
     Path = 4
     Special = 5
+    Order = 6
     Date = 7
 
     @staticmethod
@@ -26,6 +27,7 @@ class ConstraintType(Enum):
             "filetype": ConstraintType.FileType,
             "path": ConstraintType.Path,
             "special": ConstraintType.Special,
+            "order": ConstraintType.Order,
             "date": ConstraintType.Date,
         }.get(text.lower(), None)
 

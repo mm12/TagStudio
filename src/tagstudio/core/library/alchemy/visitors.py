@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, override
 
 import structlog
 from sqlalchemy import ColumnElement, and_, distinct, func, or_, select
+from sqlalchemy import true
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.operators import ilike_op
 from datetime import datetime as _dt, timedelta as _timedelta
@@ -227,6 +228,10 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
             elif op == "<=":
                 return Entry.date_added <= parsed
 
+        elif node.type == ConstraintType.Order:
+            # `order:` is a meta constraint consumed by search ordering logic.
+            return true()
+
 
         # raise exception if Constraint stays unhandled
         raise NotImplementedError("This type of constraint is not implemented yet")
@@ -299,6 +304,9 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
                     case ConstraintType.Date:
                         # Date constraints are handled as regular boolean expressions
                         # and should not trigger NotImplementedError here.
+                        pass
+                    case ConstraintType.Order:
+                        # `order:` affects sorting, not filtering.
                         pass
                     case _:
                         raise NotImplementedError(f"Unhandled constraint: '{term.type}'")
