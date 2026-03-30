@@ -121,6 +121,8 @@ class EntryFieldUpdate:
   updates: list[tuple[str, str]] = field(default_factory=list)
   # Any warnings related to this update (e.g. missing regex groups)
   warnings: list[str] = field(default_factory=list)
+  # Existing entry values for mapped keys, captured during preview scan.
+  existing_values_by_key: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -171,6 +173,23 @@ def _expand_template(template: str, match: re.Match[str]) -> str:
     return original
 
   return PLACEHOLDER_RE.sub(repl, template)
+
+
+def _extract_template_group_refs(template: str) -> list[tuple[str, int | str]]:
+  """Extract placeholder references as (kind, value) tuples.
+
+  kind is "index" for numbered groups and "name" for named groups.
+  """
+  refs: list[tuple[str, int | str]] = []
+  for ph in PLACEHOLDER_RE.finditer(template):
+    if ph.group("i") is not None:
+      with suppress(Exception):
+        refs.append(("index", int(ph.group("i"))))
+      continue
+    name = ph.group("n1") or ph.group("n2")
+    if name:
+      refs.append(("name", name))
+  return refs
 
 
 def _iter_entries(library: Library) -> Iterable[Entry]:
@@ -246,7 +265,45 @@ def iter_preview_paths_to_fields(
   only_entries_without_tags: bool = False,
   ignored_tag_categories: set[str] | None = None,
 ) -> Iterator[PreviewProgress]:
-  compiled = [(r, r.compile()) for r in rules]
+  compiled: list[
+    tuple[PathFieldRule, re.Pattern[str], list[tuple[str, str, list[tuple[str, int | str]]]]]
+  ] = []
+  for r in rules:
+    compiled.append(
+      (
+        r,
+        r.compile(),
+        [(key, tmpl, _extract_template_group_refs(tmpl)) for key, tmpl in r.fields],
+      )
+    )
+
+  ignore_set = {
+    s.strip().lower()
+    for s in (ignored_tag_categories or set())
+    if s and s.strip()
+  }
+
+  def _tag_in_ignored_categories(tag, _ignore_set: set[str] = ignore_set) -> bool:
+    try:
+      name = getattr(tag, "name", None)
+      is_cat = bool(getattr(tag, "is_category", False))
+      parents = list(getattr(tag, "parent_tags", []) or [])
+      # Direct category tag with matching name
+      if is_cat and isinstance(name, str) and name.strip().lower() in _ignore_set:
+        return True
+      # Belongs to a parent category with matching name
+      for p in parents:
+        try:
+          p_name = getattr(p, "name", None)
+          p_is_cat = bool(getattr(p, "is_category", False))
+          if p_is_cat and isinstance(p_name, str) and p_name.strip().lower() in _ignore_set:
+            return True
+        except Exception:
+          continue
+    except Exception:
+      pass
+    return False
+
   try:
     total = library.entry_count()
   except Exception:
@@ -285,34 +342,6 @@ def iter_preview_paths_to_fields(
       try:
         tags_set = getattr(entry, "tags", None)
         if tags_set:
-          # Build normalized ignore set
-          ignore_input = ignored_tag_categories or set()
-          ignore_set = {
-            s.strip().lower()
-            for s in ignore_input
-            if s and s.strip()
-          }
-          def _tag_in_ignored_categories(tag, _ignore_set: set[str] = ignore_set) -> bool:
-            try:
-              name = getattr(tag, "name", None)
-              is_cat = bool(getattr(tag, "is_category", False))
-              parents = list(getattr(tag, "parent_tags", []) or [])
-              # Direct category tag with matching name
-              if is_cat and isinstance(name, str) and name.strip().lower() in _ignore_set:
-                return True
-              # Belongs to a parent category with matching name
-              for p in parents:
-                try:
-                  p_name = getattr(p, "name", None)
-                  p_is_cat = bool(getattr(p, "is_category", False))
-                  if p_is_cat and isinstance(p_name, str) and p_name.strip().lower() in _ignore_set:
-                    return True
-                except Exception:
-                  continue
-            except Exception:
-              pass
-            return False
-
           # Remove ignored-category tags to determine if entry is effectively tagged
           effective_tags = [t for t in tags_set if not _tag_in_ignored_categories(t)]
           if effective_tags:
@@ -354,13 +383,13 @@ def iter_preview_paths_to_fields(
           with suppress(Exception):
             skip_keys.add(str(getattr(f, "type_key", "")))
 
-    for rule, cre in compiled:
+    for rule, cre, field_specs in compiled:
       target = entry.filename if rule.use_filename_only else full_path
       m = cre.search(target)
       if not m:
         continue
 
-      for key, tmpl in rule.fields:
+      for key, tmpl, group_refs in field_specs:
         if only_unset and key in skip_keys:
           continue
         value = _expand_template(tmpl, m).strip()
@@ -368,18 +397,14 @@ def iter_preview_paths_to_fields(
           continue
 
         # Detect placeholders that reference non-existent regex groups
-        for ph in PLACEHOLDER_RE.finditer(tmpl):
-          if ph.group("i") is not None:
-            try:
-              idx = int(ph.group("i"))
-              if idx < 0 or idx > len(m.groups()):
-                missing_placeholders.add(f"${idx}")
-            except Exception:
-              missing_placeholders.add(f"${ph.group('i')}")
+        for kind, ref in group_refs:
+          if kind == "index":
+            idx = int(ref)
+            if idx < 1 or idx > m.re.groups:
+              missing_placeholders.add(f"${idx}")
           else:
-            name = ph.group("n1") or ph.group("n2")
-            if name and name not in m.groupdict():
-              # show as $name for brevity
+            name = str(ref)
+            if name not in m.re.groupindex:
               missing_placeholders.add(f"${name}")
 
         pending_list.append((key, value))
@@ -387,6 +412,13 @@ def iter_preview_paths_to_fields(
     update = None
     if pending_list:
       warnings: list[str] = []
+      existing_values_by_key: dict[str, list[str]] = {}
+      touched_keys = {k for k, _ in pending_list}
+      for f in getattr(entry, "fields", []):
+        with suppress(Exception):
+          fkey = str(getattr(f, "type_key", ""))
+          if fkey in touched_keys:
+            existing_values_by_key.setdefault(fkey, []).append(f.value or "")
       if missing_placeholders:
         # Create human-friendly warnings
         for ph_name in sorted(missing_placeholders):
@@ -398,6 +430,7 @@ def iter_preview_paths_to_fields(
         path=full_path,
         updates=pending_list,
         warnings=warnings,
+        existing_values_by_key=existing_values_by_key,
       )
 
     yield PreviewProgress(index=index, total=total, path=full_path, update=update)
@@ -1496,18 +1529,9 @@ class PathsToFieldsModal(QWidget):
       for w in upd.warnings:
         lines.append(f"⚠ {w}")
     lines.append(upd.path)
-    entry = self._entry_cache.get(upd.entry_id)
-    if entry is None:
-      try:
-        entry = unwrap(self.library.get_entry_full(upd.entry_id))
-      except Exception:
-        entry = None
-      if entry is not None:
-        self._entry_cache[upd.entry_id] = entry
+    existing_by_key = getattr(upd, "existing_values_by_key", {}) or {}
     for key, value in upd.updates:
-      existing_vals = []
-      if entry is not None:
-        existing_vals = [f.value or "" for f in entry.fields if f.type_key == key]
+      existing_vals = list(existing_by_key.get(key, []))
       allow_existing = self.allow_existing_cb.isChecked()
       # Flag duplicates before generic already_set so we only warn for actual conflicts
       if value in existing_vals and value != "":
