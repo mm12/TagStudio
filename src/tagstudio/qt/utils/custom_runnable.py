@@ -3,11 +3,14 @@
 # Created for TagStudio: https://github.com/CyanVoxel/TagStudio
 
 
+import traceback
+
 from PySide6.QtCore import QObject, QRunnable, Signal
 
 
 class CustomRunnable(QRunnable, QObject):
     done = Signal()
+    error = Signal(object)
 
     def __init__(self, function) -> None:
         QRunnable.__init__(self)
@@ -15,5 +18,11 @@ class CustomRunnable(QRunnable, QObject):
         self.function = function
 
     def run(self):
-        self.function()
-        self.done.emit()
+        try:
+            self.function()
+        except Exception as exc:
+            # Preserve traceback in stderr for debugging and notify listeners.
+            traceback.print_exc()
+            self.error.emit(exc)
+        finally:
+            self.done.emit()

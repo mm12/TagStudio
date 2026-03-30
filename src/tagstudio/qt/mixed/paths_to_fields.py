@@ -46,6 +46,7 @@ import json
 import os
 import re
 import time
+import traceback
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -71,12 +72,12 @@ from PySide6.QtWidgets import (
   QWidget,
 )
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from tagstudio.core.library.alchemy.enums import FieldTypeEnum
 from tagstudio.core.library.alchemy.fields import FieldID
 from tagstudio.core.library.alchemy.library import Library
-from tagstudio.core.library.alchemy.models import Entry
+from tagstudio.core.library.alchemy.models import Entry, Tag
 from tagstudio.core.utils.types import unwrap
 from tagstudio.qt.translations import Translations
 from tagstudio.qt.utils.custom_runnable import CustomRunnable
@@ -193,20 +194,34 @@ def _extract_template_group_refs(template: str) -> list[tuple[str, int | str]]:
 
 
 def _iter_entries(library: Library) -> Iterable[Entry]:
-  # with_joins=True ensures we can inspect current fields when needed
-  yield from library.all_entries(with_joins=True)
+  # Iterate in small batches to avoid long startup time from one giant joined query.
+  with Session(library.engine) as session:
+    entry_ids = list(session.scalars(select(Entry.id).order_by(Entry.id)))
+
+  batch_size = 500
+  for batch_start in range(0, len(entry_ids), batch_size):
+    batch_ids = entry_ids[batch_start : batch_start + batch_size]
+    yield from library.get_entries_full(batch_ids)
 
 
-def _iter_filtered_entry_ids(
+def _iter_prefiltered_entries(
   library: Library,
   *,
   only_entries_without_fields: bool,
   only_entries_without_tags: bool,
   ignored_tag_categories: set[str] | None,
-) -> Iterator[int]:
-  """Yield candidate entry IDs using DB-side predicates when possible."""
+) -> Iterator[Entry]:
+  """Stream candidate entries using DB-side predicates when possible."""
+  load_tags = only_entries_without_tags and bool(ignored_tag_categories)
+  opts = [
+    selectinload(Entry.text_fields),
+    selectinload(Entry.datetime_fields),
+  ]
+  if load_tags:
+    opts.append(selectinload(Entry.tags).options(selectinload(Tag.parent_tags)))
+
   with Session(library.engine) as session:
-    stmt = select(Entry.id)
+    stmt = select(Entry).options(*opts)
 
     if only_entries_without_fields:
       stmt = stmt.where(~Entry.text_fields.any(), ~Entry.datetime_fields.any())
@@ -218,9 +233,10 @@ def _iter_filtered_entry_ids(
       stmt = stmt.where(~Entry.tags.any())
 
     stmt = stmt.order_by(Entry.id)
-    for entry_id in session.scalars(stmt):
-      with suppress(Exception):
-        yield int(entry_id)
+    entries = session.scalars(stmt)
+    for entry in entries:
+      yield entry
+      session.expunge(entry)
 
 
 def _iter_entries_for_preview(
@@ -230,30 +246,14 @@ def _iter_entries_for_preview(
   only_entries_without_tags: bool,
   ignored_tag_categories: set[str] | None,
 ) -> Iterable[Entry]:
-  """Iterate entries, using DB prefiltering to avoid full-library scans."""
-  can_prefilter = (
-    only_entries_without_fields
-    or (only_entries_without_tags and not ignored_tag_categories)
-  )
-  if not can_prefilter:
-    yield from _iter_entries(library)
-    return
+  """Iterate entries for preview/apply preparation.
 
-  batch: list[int] = []
-  batch_size = 500
-  for entry_id in _iter_filtered_entry_ids(
-    library,
-    only_entries_without_fields=only_entries_without_fields,
-    only_entries_without_tags=only_entries_without_tags,
-    ignored_tag_categories=ignored_tag_categories,
-  ):
-    batch.append(entry_id)
-    if len(batch) >= batch_size:
-      yield from library.get_entries_full(batch)
-      batch.clear()
-
-  if batch:
-    yield from library.get_entries_full(batch)
+  NOTE: DB-side prefiltering is currently disabled due branch regressions
+  causing pathological stalls on some libraries. Keep Python-side filtering
+  so macro processing starts reliably.
+  """
+  _ = (only_entries_without_fields, only_entries_without_tags, ignored_tag_categories)
+  yield from _iter_entries(library)
 
 def iter_preview_paths_to_fields(
   library: Library,
@@ -282,6 +282,7 @@ def iter_preview_paths_to_fields(
     for s in (ignored_tag_categories or set())
     if s and s.strip()
   }
+  tags_filter_handled_in_sql = only_entries_without_tags and not ignored_tag_categories
 
   def _tag_in_ignored_categories(tag, _ignore_set: set[str] = ignore_set) -> bool:
     try:
@@ -309,6 +310,9 @@ def iter_preview_paths_to_fields(
   except Exception:
     total = None
 
+  # Emit an immediate heartbeat so the UI reflects that work has started.
+  yield PreviewProgress(index=0, total=total, path="", update=None)
+
   base_path = None
   try:
     folder_obj = getattr(library, "folder", None)
@@ -329,16 +333,21 @@ def iter_preview_paths_to_fields(
     if cancel_callback and cancel_callback():
       break
 
+    # Build once per entry to avoid repeated `Entry.fields` property work.
+    text_fields = getattr(entry, "text_fields", []) or []
+    datetime_fields = getattr(entry, "datetime_fields", []) or []
+    entry_fields = [*text_fields, *datetime_fields]
+
     # Optionally skip entries that already have any fields on them
     if only_entries_without_fields:
       try:
-        if getattr(entry, "fields", None):
-          # entry.fields is truthy when there is at least one field
+        if entry_fields:
+          # Entry has at least one field
           continue
       except Exception:
         pass
     # Optionally treat entries with only tags in ignored categories as "untagged"
-    if only_entries_without_tags:
+    if only_entries_without_tags and not tags_filter_handled_in_sql:
       try:
         tags_set = getattr(entry, "tags", None)
         if tags_set:
@@ -378,7 +387,7 @@ def iter_preview_paths_to_fields(
 
     skip_keys: set[str] = set()
     if only_unset:
-      for f in entry.fields:
+      for f in entry_fields:
         if (f.value or "") != "":
           with suppress(Exception):
             skip_keys.add(str(getattr(f, "type_key", "")))
@@ -414,7 +423,7 @@ def iter_preview_paths_to_fields(
       warnings: list[str] = []
       existing_values_by_key: dict[str, list[str]] = {}
       touched_keys = {k for k, _ in pending_list}
-      for f in getattr(entry, "fields", []):
+      for f in entry_fields:
         with suppress(Exception):
           fkey = str(getattr(f, "type_key", ""))
           if fkey in touched_keys:
@@ -802,6 +811,7 @@ class PathsToFieldsModal(QWidget):
     self._preview_buffer_timer.setSingleShot(True)
     self._preview_buffer_timer.timeout.connect(self._flush_preview_buffer)
     self._preview_buffer_interval_ms = 160
+    self._worker_error: str | None = None
     # Cache entries fetched during preview/apply to reduce repeated DB calls
     self._entry_cache: dict[int, Entry] = {}
     self._apply_match_count = 0
@@ -1262,6 +1272,7 @@ class PathsToFieldsModal(QWidget):
 
     runnable = CustomRunnable(iterator.run)
     runnable.done.connect(self._finalize_preview)
+    runnable.error.connect(self._handle_worker_error)
 
     self._preview_iterator = iterator
     self._preview_runnable = runnable
@@ -1307,6 +1318,7 @@ class PathsToFieldsModal(QWidget):
 
     runnable = CustomRunnable(iterator.run)
     runnable.done.connect(self._finalize_apply)
+    runnable.error.connect(self._handle_worker_error)
 
     self._apply_iterator = iterator
     self._apply_runnable = runnable
@@ -1715,6 +1727,16 @@ class PathsToFieldsModal(QWidget):
     self._flush_preview_buffer()
     self._finish_progress()
     self._set_controls_enabled(enabled=True)
+    if self._worker_error:
+      msg_box = QMessageBox()
+      msg_box.setIcon(QMessageBox.Icon.Critical)
+      msg_box.setWindowTitle(Translations["paths_to_fields.title"])
+      msg_box.setText("Paths to Fields worker failed")
+      msg_box.setInformativeText(self._worker_error)
+      msg_box.addButton(Translations["generic.close"], QMessageBox.ButtonRole.AcceptRole)
+      msg_box.exec_()
+      self._worker_error = None
+      return
     if not self._preview_results and not cancelled:
       self.preview_area.setPlainText(Translations["paths_to_fields.msg.no_matches"])
 
@@ -1726,6 +1748,18 @@ class PathsToFieldsModal(QWidget):
     self._flush_preview_buffer()
     self._finish_progress()
     self._set_controls_enabled(enabled=True)
+    if self._worker_error:
+      msg_box = QMessageBox()
+      msg_box.setIcon(QMessageBox.Icon.Critical)
+      msg_box.setWindowTitle(Translations["paths_to_fields.title"])
+      msg_box.setText("Paths to Fields worker failed")
+      msg_box.setInformativeText(self._worker_error)
+      msg_box.addButton(Translations["generic.close"], QMessageBox.ButtonRole.AcceptRole)
+      msg_box.exec_()
+      self._worker_error = None
+      self._cancel_apply = False
+      self._apply_match_count = 0
+      return
     if self._apply_match_count == 0 and not self._cancel_apply:
       msg_box = QMessageBox()
       msg_box.setIcon(QMessageBox.Icon.Information)
@@ -1761,3 +1795,12 @@ class PathsToFieldsModal(QWidget):
       self._update_progress(self._pending_progress, force=True)
     if self._preview_update_buffer and not self._preview_buffer_timer.isActive():
       self._flush_preview_buffer()
+
+  def _handle_worker_error(self, error: object) -> None:
+    # Keep a concise traceback so failure cause is visible to users/developers.
+    if isinstance(error, BaseException):
+      self._worker_error = "".join(
+        traceback.format_exception(type(error), error, error.__traceback__)
+      )[-3000:]
+    else:
+      self._worker_error = str(error)
