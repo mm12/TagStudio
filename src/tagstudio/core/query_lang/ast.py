@@ -17,6 +17,7 @@ class ConstraintType(Enum):
     Special = 5
     Order = 6
     Date = 7
+    Field = 8
 
     @staticmethod
     def from_string(text: str) -> "ConstraintType | None":
@@ -29,6 +30,7 @@ class ConstraintType(Enum):
             "special": ConstraintType.Special,
             "order": ConstraintType.Order,
             "date": ConstraintType.Date,
+            "field": ConstraintType.Field,
         }.get(text.lower(), None)
 
 

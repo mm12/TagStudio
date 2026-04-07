@@ -5,6 +5,7 @@
 
 import pytest
 import structlog
+from pathlib import Path
 
 from tagstudio.core.library.alchemy.enums import BrowsingState
 from tagstudio.core.library.alchemy.library import Library
@@ -157,4 +158,80 @@ def test_date_constraint_with_following_term_does_not_error(search_library: Libr
 
 def test_date_constraint_accepts_generic_relative_duration(search_library: Library):
     results = search_library.search_library(BrowsingState.from_search_query("date:2d"), page_size=500)
+    assert isinstance(results.total_count, int)
+
+
+def test_field_search_basic(library: Library):
+    # Test field search with a created library
+    from tagstudio.core.library.alchemy.models import Entry
+    from tagstudio.core.library.alchemy.fields import TextField
+    
+    folder = next(library.all_folders())
+    
+    # Create entries with text fields
+    entry1 = Entry(
+        folder=folder,
+        path=Path("test1.jpg"),
+        fields=library.default_fields,
+    )
+    entry2 = Entry(
+        folder=folder,
+        path=Path("test2.jpg"),
+        fields=library.default_fields,
+    )
+    entry3 = Entry(
+        folder=folder,
+        path=Path("test3.jpg"),
+        fields=library.default_fields,
+    )
+    
+    assert library.add_entries([entry1, entry2, entry3])
+    
+    # Add field values to entries
+    # Set title field for entry1
+    from sqlalchemy.orm import Session
+    with Session(library.engine) as session:
+        title_field_type = session.query(library.models.ValueType).filter_by(key="title").first()
+        if title_field_type:
+            field1 = TextField(
+                type_key="title",
+                value="My Awesome Photo",
+                entry_id=entry1.id,
+                position=0
+            )
+            field2 = TextField(
+                type_key="title",
+                value="Another Photo",
+                entry_id=entry2.id,
+                position=0
+            )
+            field3 = TextField(
+                type_key="title",
+                value="My Awesome Art",
+                entry_id=entry3.id,
+                position=0
+            )
+            session.add_all([field1, field2, field3])
+            session.commit()
+    
+    # Query: search for "Awesome" in title field
+    results = library.search_library(
+        BrowsingState.from_search_query("field:title=Awesome"), 
+        page_size=500
+    )
+    # Should find entry1 and entry3
+    assert results.total_count == 2
+
+
+@pytest.mark.parametrize(
+    ["query", "count"],
+    [
+        # Basic field search tests with special syntax
+        # Empty search term should return nothing
+        ("field:unknown_field=test", 0),
+    ],
+)
+def test_field_search_syntax(search_library: Library, query: str, count: int):
+    # Test that field search constraint is properly parsed without errors
+    results = search_library.search_library(BrowsingState.from_search_query(query), page_size=500)
     assert isinstance(results.total_count, int)

@@ -14,7 +14,7 @@ from datetime import datetime as _dt, timedelta as _timedelta
 
 from tagstudio.core.library.alchemy.constants import TAG_CHILDREN_ID_QUERY
 from tagstudio.core.library.alchemy.joins import TagEntry
-from tagstudio.core.library.alchemy.models import Entry, Tag, TagAlias
+from tagstudio.core.library.alchemy.models import Entry, Tag, TagAlias, ValueType
 from tagstudio.core.library.alchemy.fields import TextField, DatetimeField
 from tagstudio.core.media_types import FILETYPE_EQUIVALENTS, MediaCategories
 from tagstudio.core.query_lang.ast import (
@@ -232,6 +232,40 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
             # `order:` is a meta constraint consumed by search ordering logic.
             return true()
 
+        elif node.type == ConstraintType.Field:
+            # Field search format: field:field_name=search_term or field:field_name:search_term
+            # Parse the field name and search term
+            field_spec = node.value
+            
+            # Try to split on '=' first, then fallback to ':'
+            if '=' in field_spec:
+                parts = field_spec.split('=', 1)
+            else:
+                parts = field_spec.split(':', 1)
+            
+            if len(parts) != 2:
+                logger.error("Invalid field search format", value=node.value)
+                raise NotImplementedError(
+                    "Field search requires format: field:field_name=search_term"
+                )
+            
+            field_name, search_term = parts
+            field_name = field_name.strip()
+            search_term = search_term.strip()
+            
+            # Query for TextField entries matching the field name and search term
+            text_field_query = select(TextField.entry_id).where(
+                TextField.type_key.ilike(field_name),
+                TextField.value.ilike(f"%{search_term}%")
+            )
+            
+            # When searching datetime fields without a specific filter, match any datetime field with the name
+            datetime_field_query = select(DatetimeField.entry_id).where(
+                DatetimeField.type_key.ilike(field_name)
+            )
+            
+            # Return entries that have matching fields
+            return Entry.id.in_(text_field_query.union(datetime_field_query))
 
         # raise exception if Constraint stays unhandled
         raise NotImplementedError("This type of constraint is not implemented yet")
@@ -307,6 +341,9 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
                         pass
                     case ConstraintType.Order:
                         # `order:` affects sorting, not filtering.
+                        pass
+                    case ConstraintType.Field:
+                        # Field search is handled as a regular boolean expression
                         pass
                     case _:
                         raise NotImplementedError(f"Unhandled constraint: '{term.type}'")
