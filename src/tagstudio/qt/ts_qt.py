@@ -38,7 +38,14 @@ from PySide6.QtGui import (
     QMouseEvent,
     QPalette,
 )
-from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QPushButton, QScrollArea
+from PySide6.QtWidgets import (
+  QApplication, 
+  QFileDialog, 
+  QMessageBox, 
+  QPushButton, 
+  QScrollArea,
+  QWidget,
+)
 
 # This import has side-effect of importing PySide resources
 import tagstudio.qt.resources_rc  # noqa: F401  # pyright: ignore[reportUnusedImport]
@@ -471,14 +478,16 @@ class QtDriver(DriverMixin, QObject):
         )
 
         self.main_window.menu_bar.add_tag_to_selected_action.triggered.connect(
-            self.add_tag_modal.show
+            lambda: self.show_and_focus(self.add_tag_modal)
         )
 
         self.main_window.menu_bar.delete_file_action.triggered.connect(
             lambda f="": self.delete_files_callback(f)
         )
 
-        self.main_window.menu_bar.tag_manager_action.triggered.connect(self.tag_manager_panel.show)
+        self.main_window.menu_bar.tag_manager_action.triggered.connect(
+            lambda: self.show_and_focus(self.tag_manager_panel)
+        )
 
         self.main_window.menu_bar.color_manager_action.triggered.connect(
             self.color_manager_panel.show
@@ -495,7 +504,7 @@ class QtDriver(DriverMixin, QObject):
         def create_library_info_window():
             if not hasattr(self, "library_info_window"):
                 self.library_info_window = LibraryInfoWindow(self.lib, self)
-            self.library_info_window.show()
+            self.show_and_focus(self.library_info_window)
 
         self.main_window.menu_bar.library_info_action.triggered.connect(create_library_info_window)
 
@@ -543,7 +552,7 @@ class QtDriver(DriverMixin, QObject):
         def create_fix_unlinked_entries_modal():
             if not hasattr(self, "unlinked_modal"):
                 self.unlinked_modal = FixUnlinkedEntriesModal(self.lib, self)
-            self.unlinked_modal.show()
+            self.show_and_focus(self.unlinked_modal)
 
         self.main_window.menu_bar.fix_unlinked_entries_action.triggered.connect(
             create_fix_unlinked_entries_modal
@@ -552,7 +561,7 @@ class QtDriver(DriverMixin, QObject):
         def create_ignored_entries_modal():
             if not hasattr(self, "ignored_modal"):
                 self.ignored_modal = FixIgnoredEntriesModal(self.lib, self)
-            self.ignored_modal.show()
+            self.show_and_focus(self.ignored_modal)
 
         self.main_window.menu_bar.fix_ignored_entries_action.triggered.connect(
             create_ignored_entries_modal
@@ -561,7 +570,7 @@ class QtDriver(DriverMixin, QObject):
         def create_dupe_files_modal():
             if not hasattr(self, "dupe_modal"):
                 self.dupe_modal = FixDupeFilesModal(self.lib, self)
-            self.dupe_modal.show()
+            self.show_and_focus(self.dupe_modal)
 
         self.main_window.menu_bar.fix_dupe_files_action.triggered.connect(create_dupe_files_modal)
 
@@ -576,7 +585,7 @@ class QtDriver(DriverMixin, QObject):
         def create_folders_tags_modal():
             if not hasattr(self, "folders_modal"):
                 self.folders_modal = FoldersToTagsModal(self.lib, self)
-            self.folders_modal.show()
+            self.show_and_focus(self.folders_modal)
 
         self.main_window.menu_bar.folders_to_tags_action.triggered.connect(
             create_folders_tags_modal
@@ -585,7 +594,7 @@ class QtDriver(DriverMixin, QObject):
         def create_paths_fields_modal():
             if not hasattr(self, "paths_fields_modal"):
                 self.paths_fields_modal = PathsToFieldsModal(self.lib, self)
-            self.paths_fields_modal.show()
+            self.show_and_focus(self.paths_fields_modal)
 
         self.main_window.menu_bar.paths_to_fields_action.triggered.connect(
             create_paths_fields_modal
@@ -597,7 +606,7 @@ class QtDriver(DriverMixin, QObject):
         def create_about_modal():
             if not hasattr(self, "about_modal"):
                 self.about_modal = AboutModal(self.global_settings_path)
-            self.about_modal.show()
+            self.show_and_focus(self.about_modal)
 
         self.main_window.menu_bar.about_action.triggered.connect(create_about_modal)
 
@@ -747,11 +756,21 @@ class QtDriver(DriverMixin, QObject):
             is_savable=True,
         )
         self.ignore_modal.saved.connect(panel.save)
-        self.main_window.menu_bar.ignore_modal_action.triggered.connect(self.ignore_modal.show)
+        self.main_window.menu_bar.ignore_modal_action.triggered.connect(
+            lambda: self.show_and_focus(self.ignore_modal)
+        )
 
     def show_grid_filenames(self, value: bool):
         for thumb in self.main_window.thumb_layout._item_thumbs:
             thumb.set_filename_visibility(value)
+
+    def show_and_focus(self, widget: QWidget | None):
+        if widget is None:
+            return
+
+        widget.show()
+        widget.raise_()
+        widget.activateWindow()
 
     def call_if_library_open(self, func):
         """Check if loaded library has valid path before executing the button function."""
