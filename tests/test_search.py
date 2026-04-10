@@ -160,6 +160,11 @@ def test_date_constraint_accepts_generic_relative_duration(search_library: Libra
     assert isinstance(results.total_count, int)
 
 
+def test_path_constraint_accepts_quoted_regex(search_library: Library):
+    # Regression: quoted slash-delimited path regex should be evaluated as regex.
+    verify_count(search_library, 'path:"/comp/"', 5)
+
+
 def test_field_search_with_selector_and_wildcard(library: Library):
     entries = list(library.all_entries(with_joins=True))
     assert len(entries) >= 2
