@@ -100,6 +100,13 @@ class PanelModal(QWidget):
         widget.parent_post_init()
 
     @override
+    def show(self) -> None:
+        """Show and focus this modal, even if it already exists."""
+        super().show()
+        self.raise_()
+        self.activateWindow()
+
+    @override
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         if self.cancel_button:
             self.cancel_button.click()
