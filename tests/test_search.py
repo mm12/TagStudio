@@ -259,3 +259,28 @@ def test_not_order_constraint_reverses_only_field_sorted_subset(library: Library
     # Fallback entries stay in fallback group and are not part of the reversal operation.
     assert third_id in asc_results.ids[2:]
     assert third_id in not_order_results.ids[2:]
+
+
+def test_secondary_order_constraint_breaks_ties(library: Library):
+    entries = list(library.all_entries(with_joins=True))
+    assert len(entries) >= 2
+    first_id = entries[0].id
+    second_id = entries[1].id
+
+    assert library.add_value_type("series", name="Series")
+    assert library.add_value_type("artist", name="Artist")
+
+    # Tie on primary field.
+    assert library.add_field_to_entry(first_id, field_id="series", value="A")
+    assert library.add_field_to_entry(second_id, field_id="series", value="A")
+
+    # Break tie on secondary field.
+    assert library.add_field_to_entry(first_id, field_id="artist", value="zeta")
+    assert library.add_field_to_entry(second_id, field_id="artist", value="alpha")
+
+    state = BrowsingState.from_search_query("order:series order:artist").with_sorting_direction(True)
+    results = library.search_library(state, page_size=500)
+
+    assert results.total_count >= 2
+    assert results.ids[0] == second_id
+    assert results.ids[1] == first_id
