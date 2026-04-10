@@ -1061,64 +1061,55 @@ class Library:
         def _extract_order_constraint(
             node: AST | None,
             order_negated: bool = False,
-        ) -> tuple[AST | None, str | None, bool]:
+        ) -> tuple[AST | None, list[tuple[str, bool]]]:
             if node is None:
-                return None, None, False
+                return None, []
 
             if isinstance(node, Constraint):
                 if node.type == ConstraintType.Order:
                     field_key = node.value.strip().strip('"').strip("'")
-                    return None, field_key or None, order_negated
-                return node, None, False
+                    if field_key:
+                        return None, [(field_key, order_negated)]
+                    return None, []
+                return node, []
 
             if isinstance(node, ANDList):
                 terms: list[AST] = []
-                order_field: str | None = None
-                order_field_negated = False
+                order_specs: list[tuple[str, bool]] = []
                 for term in node.terms:
-                    filtered, order_candidate, order_candidate_negated = _extract_order_constraint(term)
+                    filtered, nested_specs = _extract_order_constraint(term, order_negated)
                     if filtered is not None:
                         terms.append(filtered)
-                    if order_candidate:
-                        order_field = order_candidate
-                        order_field_negated = order_candidate_negated
+                    order_specs.extend(nested_specs)
 
                 if len(terms) == 0:
-                    return None, order_field, order_field_negated
+                    return None, order_specs
                 if len(terms) == 1:
-                    return terms[0], order_field, order_field_negated
-                return ANDList(terms), order_field, order_field_negated
+                    return terms[0], order_specs
+                return ANDList(terms), order_specs
 
             if isinstance(node, ORList):
                 elements: list[AST] = []
-                order_field: str | None = None
-                order_field_negated = False
+                order_specs: list[tuple[str, bool]] = []
                 for element in node.elements:
-                    filtered, order_candidate, order_candidate_negated = _extract_order_constraint(
-                        element
-                    )
+                    filtered, nested_specs = _extract_order_constraint(element, order_negated)
                     if filtered is not None:
                         elements.append(filtered)
-                    if order_candidate:
-                        order_field = order_candidate
-                        order_field_negated = order_candidate_negated
+                    order_specs.extend(nested_specs)
 
                 if len(elements) == 0:
-                    return None, order_field, order_field_negated
+                    return None, order_specs
                 if len(elements) == 1:
-                    return elements[0], order_field, order_field_negated
-                return ORList(elements), order_field, order_field_negated
+                    return elements[0], order_specs
+                return ORList(elements), order_specs
 
             if isinstance(node, Not):
-                filtered, order_field, child_order_negated = _extract_order_constraint(
-                    node.child,
-                    not order_negated,
-                )
+                filtered, nested_specs = _extract_order_constraint(node.child, not order_negated)
                 if filtered is None:
-                    return None, order_field, child_order_negated
-                return Not(filtered), order_field, child_order_negated
+                    return None, nested_specs
+                return Not(filtered), nested_specs
 
-            return node, None, False
+            return node, []
 
         def _parse_field_selector(value: str) -> tuple[str, int | None]:
             match = re.fullmatch(r"(?P<field>.+?)(?:#(?P<index>[1-9]\d*))?", value.strip())
@@ -1159,7 +1150,7 @@ class Library:
                 statement = select(Entry.id)
 
             ast = search.ast
-            filter_ast, order_field_key, order_field_negated = _extract_order_constraint(ast)
+            filter_ast, order_specs = _extract_order_constraint(ast)
 
             if not search.show_hidden_entries:
                 statement = statement.where(~Entry.tags.any(Tag.is_hidden))
@@ -1185,13 +1176,15 @@ class Library:
                 case SortingModeEnum.RANDOM:
                     sort_on = func.sin(Entry.id * search.random_seed)
 
-            resolved_order_field_keys: list[str] = []
-            order_field_occurrence: int | None = None
-            order_value_match: str | None = None
-            if order_field_key:
+            for order_field_key, order_field_negated in order_specs:
+                resolved_order_field_keys: list[str] = []
+                order_field_occurrence: int | None = None
+                order_value_match: str | None = None
+
                 order_field_spec, order_value_match = _split_order_spec(order_field_key)
                 order_field_name, order_field_occurrence = _parse_field_selector(order_field_spec)
                 normalized_order_key = order_field_name.strip().lower().replace(" ", "_")
+
                 if normalized_order_key:
                     order_key_stmt = (
                         select(ValueType.key)
@@ -1214,7 +1207,9 @@ class Library:
                     else:
                         resolved_order_field_keys = candidate_keys
 
-            if resolved_order_field_keys:
+                if not resolved_order_field_keys:
+                    continue
+
                 # `NOT order:...` reverses field-order direction only for entries where
                 # the order field produced a sortable value. Fallback entries are unaffected.
                 effective_order_ascending = search.ascending
@@ -1233,7 +1228,9 @@ class Library:
                         func.trim(DatetimeField.value) != "",
                     ]
                     if order_value_match is not None:
-                        text_filters.append(_value_match_expression(TextField.value, order_value_match))
+                        text_filters.append(
+                            _value_match_expression(TextField.value, order_value_match)
+                        )
                         datetime_filters.append(
                             _value_match_expression(DatetimeField.value, order_value_match)
                         )
@@ -1270,7 +1267,9 @@ class Library:
                         func.trim(DatetimeField.value) != "",
                     ]
                     if order_value_match is not None:
-                        text_filters.append(_value_match_expression(TextField.value, order_value_match))
+                        text_filters.append(
+                            _value_match_expression(TextField.value, order_value_match)
+                        )
                         datetime_filters.append(
                             _value_match_expression(DatetimeField.value, order_value_match)
                         )
