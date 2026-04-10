@@ -1261,6 +1261,34 @@ class Library:
 
             return node, None
 
+        def _parse_field_selector(value: str) -> tuple[str, int | None]:
+            match = re.fullmatch(r"(?P<field>.+?)(?:#(?P<index>[1-9]\d*))?", value.strip())
+            if match is None:
+                return value.strip(), None
+
+            field_name = (match.group("field") or "").strip()
+            index_text = match.group("index")
+            return field_name, int(index_text) if index_text is not None else None
+
+        def _split_order_spec(value: str) -> tuple[str, str | None]:
+            # Allows `order:"artist=*!*"` to sort by only matching values.
+            if "=" in value:
+                field_spec, value_match = value.split("=", 1)
+                return field_spec.strip(), value_match.strip()
+            return value.strip(), None
+
+        def _value_match_expression(column, matcher: str):
+            normalized = matcher.strip()
+            if normalized == "*":
+                return and_(column.is_not(None), func.trim(column) != "")
+
+            if "*" in normalized or "?" in normalized:
+                if normalized == normalized.lower():
+                    return func.lower(column).op("GLOB")(normalized.lower())
+                return column.op("GLOB")(normalized)
+
+            return column.ilike(f"%{normalized}%")
+
         with Session(unwrap(self.engine), expire_on_commit=False) as session:
             if page_size:
                 statement = (
@@ -1298,51 +1326,130 @@ class Library:
                 case SortingModeEnum.RANDOM:
                     sort_on = func.sin(Entry.id * search.random_seed)
 
-            resolved_order_field_key: str | None = None
+            resolved_order_field_keys: list[str] = []
+            order_field_occurrence: int | None = None
+            order_value_match: str | None = None
             if order_field_key:
-                normalized_order_key = order_field_key.strip().lower()
+                order_field_spec, order_value_match = _split_order_spec(order_field_key)
+                order_field_name, order_field_occurrence = _parse_field_selector(order_field_spec)
+                normalized_order_key = order_field_name.strip().lower().replace(" ", "_")
                 if normalized_order_key:
-                    order_key_stmt = select(ValueType.key).where(
-                        or_(
-                            func.lower(ValueType.key) == normalized_order_key,
-                            func.lower(ValueType.name) == normalized_order_key,
-                            func.lower(func.replace(ValueType.name, " ", "_"))
-                            == normalized_order_key,
+                    order_key_stmt = (
+                        select(ValueType.key)
+                        .where(
+                            or_(
+                                func.lower(ValueType.key) == normalized_order_key,
+                                func.lower(ValueType.name) == normalized_order_key,
+                                func.lower(func.replace(ValueType.name, " ", "_"))
+                                == normalized_order_key,
+                            )
                         )
+                        .order_by(ValueType.position.asc(), ValueType.key.asc())
                     )
-                    resolved_order_field_key = session.scalar(order_key_stmt)
+                    candidate_keys = list(session.scalars(order_key_stmt))
 
-            if resolved_order_field_key:
-                text_order_subquery = (
-                    select(
-                        TextField.entry_id.label("entry_id"),
-                        func.min(func.lower(func.trim(TextField.value))).label("order_value"),
-                    )
-                    .where(
-                        and_(
-                            TextField.type_key == resolved_order_field_key,
-                            TextField.value.is_not(None),
-                            func.trim(TextField.value) != "",
+                    if order_field_occurrence is not None:
+                        key_idx = order_field_occurrence - 1
+                        if 0 <= key_idx < len(candidate_keys):
+                            resolved_order_field_keys = [candidate_keys[key_idx]]
+                    else:
+                        resolved_order_field_keys = candidate_keys
+
+            if resolved_order_field_keys:
+                if order_field_occurrence is None:
+                    text_filters = [
+                        TextField.type_key.in_(resolved_order_field_keys),
+                        TextField.value.is_not(None),
+                        func.trim(TextField.value) != "",
+                    ]
+                    datetime_filters = [
+                        DatetimeField.type_key.in_(resolved_order_field_keys),
+                        DatetimeField.value.is_not(None),
+                        func.trim(DatetimeField.value) != "",
+                    ]
+                    if order_value_match is not None:
+                        text_filters.append(_value_match_expression(TextField.value, order_value_match))
+                        datetime_filters.append(
+                            _value_match_expression(DatetimeField.value, order_value_match)
                         )
-                    )
-                    .group_by(TextField.entry_id)
-                    .subquery()
-                )
-                datetime_order_subquery = (
-                    select(
-                        DatetimeField.entry_id.label("entry_id"),
-                        func.min(func.lower(func.trim(DatetimeField.value))).label("order_value"),
-                    )
-                    .where(
-                        and_(
-                            DatetimeField.type_key == resolved_order_field_key,
-                            DatetimeField.value.is_not(None),
-                            func.trim(DatetimeField.value) != "",
+
+                    text_order_subquery = (
+                        select(
+                            TextField.entry_id.label("entry_id"),
+                            func.min(func.lower(func.trim(TextField.value))).label("order_value"),
                         )
+                        .where(and_(*text_filters))
+                        .group_by(TextField.entry_id)
+                        .subquery()
                     )
-                    .group_by(DatetimeField.entry_id)
-                    .subquery()
-                )
+                    datetime_order_subquery = (
+                        select(
+                            DatetimeField.entry_id.label("entry_id"),
+                            func.min(func.lower(func.trim(DatetimeField.value))).label(
+                                "order_value"
+                            ),
+                        )
+                        .where(and_(*datetime_filters))
+                        .group_by(DatetimeField.entry_id)
+                        .subquery()
+                    )
+                else:
+                    text_filters = [
+                        TextField.type_key.in_(resolved_order_field_keys),
+                        TextField.value.is_not(None),
+                        func.trim(TextField.value) != "",
+                    ]
+                    datetime_filters = [
+                        DatetimeField.type_key.in_(resolved_order_field_keys),
+                        DatetimeField.value.is_not(None),
+                        func.trim(DatetimeField.value) != "",
+                    ]
+                    if order_value_match is not None:
+                        text_filters.append(_value_match_expression(TextField.value, order_value_match))
+                        datetime_filters.append(
+                            _value_match_expression(DatetimeField.value, order_value_match)
+                        )
+
+                    ranked_text = (
+                        select(
+                            TextField.entry_id.label("entry_id"),
+                            func.lower(func.trim(TextField.value)).label("order_value"),
+                            func.row_number()
+                            .over(
+                                partition_by=(TextField.entry_id, TextField.type_key),
+                                order_by=(TextField.position.asc(), TextField.id.asc()),
+                            )
+                            .label("row_num"),
+                        )
+                        .where(and_(*text_filters))
+                        .subquery()
+                    )
+
+                    ranked_datetime = (
+                        select(
+                            DatetimeField.entry_id.label("entry_id"),
+                            func.lower(func.trim(DatetimeField.value)).label("order_value"),
+                            func.row_number()
+                            .over(
+                                partition_by=(DatetimeField.entry_id, DatetimeField.type_key),
+                                order_by=(DatetimeField.position.asc(), DatetimeField.id.asc()),
+                            )
+                            .label("row_num"),
+                        )
+                        .where(and_(*datetime_filters))
+                        .subquery()
+                    )
+
+                    text_order_subquery = (
+                        select(ranked_text.c.entry_id, ranked_text.c.order_value)
+                        .where(ranked_text.c.row_num == order_field_occurrence)
+                        .subquery()
+                    )
+                    datetime_order_subquery = (
+                        select(ranked_datetime.c.entry_id, ranked_datetime.c.order_value)
+                        .where(ranked_datetime.c.row_num == order_field_occurrence)
+                        .subquery()
+                    )
 
                 statement = statement.outerjoin(
                     text_order_subquery, text_order_subquery.c.entry_id == Entry.id

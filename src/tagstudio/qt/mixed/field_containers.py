@@ -298,6 +298,9 @@ class FieldContainers(QWidget):
             container.set_inner_widget(inner_widget)
 
             if not is_mixed:
+                container.set_search_callback(
+                    lambda f=field: self.search_for_field(f)
+                )
                 edit_modal = PanelModal(
                     EditText(field.name, field.value, field.is_multiline),
                     window_title=f"{Translations['field.edit']} ({Translations[field_name_key]})",
@@ -315,6 +318,8 @@ class FieldContainers(QWidget):
                         callback=partial(remove_field_callback, field, self.top_entry_id),
                     )
                 )
+            else:
+                container.set_search_callback()
 
         def write_datetime_container(
             container: FieldContainer, field: DatetimeField, title: str, is_mixed: bool
@@ -334,6 +339,9 @@ class FieldContainers(QWidget):
 
             inner_widget = TextContainerWidget(title, text)
             container.set_inner_widget(inner_widget)
+            container.set_search_callback(
+                lambda f=field: self.search_for_field(f)
+            )
 
             if not is_mixed:
                 edit_modal = PanelModal(
@@ -358,6 +366,9 @@ class FieldContainers(QWidget):
             container.set_title(field.name)
             inner_widget = TextContainerWidget(title, field.name)
             container.set_inner_widget(inner_widget)
+            container.set_search_callback(
+                lambda f=field: self.search_for_field(f)
+            )
             container.set_remove_callback(
                 lambda: self.remove_message_box(
                     prompt=self.remove_field_prompt(field.name),
@@ -438,6 +449,7 @@ class FieldContainers(QWidget):
             container.set_inner_widget(inner_widget)
 
         container.set_edit_callback()
+        container.set_search_callback()
         container.set_remove_callback()
         container.setHidden(False)
 
@@ -480,3 +492,13 @@ class FieldContainers(QWidget):
         result = remove_mb.exec_()
         if result == QMessageBox.ButtonRole.ActionRole.value:
             callback()
+
+    def search_for_field(self, field: BaseField) -> None:
+        """Build a field query from the current field and execute it."""
+        raw_value = "" if field.value is None else str(field.value)
+        escaped = raw_value.replace("\\", "\\\\").replace('"', '\\"')
+        query = f'field:"{field.type_key}={escaped}"'
+
+        self.driver.main_window.search_field.setText(query)
+        current = self.driver.browsing_history.current
+        self.driver.update_browsing_state(current.with_search_query(query))
