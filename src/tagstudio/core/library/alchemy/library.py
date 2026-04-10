@@ -1211,55 +1211,65 @@ class Library:
 
         def _extract_order_constraint(
             node: AST | None,
-        ) -> tuple[AST | None, str | None]:
+            order_negated: bool = False,
+        ) -> tuple[AST | None, str | None, bool]:
             if node is None:
-                return None, None
+                return None, None, False
 
             if isinstance(node, Constraint):
                 if node.type == ConstraintType.Order:
                     field_key = node.value.strip().strip('"').strip("'")
-                    return None, field_key or None
-                return node, None
+                    return None, field_key or None, order_negated
+                return node, None, False
 
             if isinstance(node, ANDList):
                 terms: list[AST] = []
                 order_field: str | None = None
+                order_field_negated = False
                 for term in node.terms:
-                    filtered, order_candidate = _extract_order_constraint(term)
+                    filtered, order_candidate, order_candidate_negated = _extract_order_constraint(term)
                     if filtered is not None:
                         terms.append(filtered)
                     if order_candidate:
                         order_field = order_candidate
+                        order_field_negated = order_candidate_negated
 
                 if len(terms) == 0:
-                    return None, order_field
+                    return None, order_field, order_field_negated
                 if len(terms) == 1:
-                    return terms[0], order_field
-                return ANDList(terms), order_field
+                    return terms[0], order_field, order_field_negated
+                return ANDList(terms), order_field, order_field_negated
 
             if isinstance(node, ORList):
                 elements: list[AST] = []
                 order_field: str | None = None
+                order_field_negated = False
                 for element in node.elements:
-                    filtered, order_candidate = _extract_order_constraint(element)
+                    filtered, order_candidate, order_candidate_negated = _extract_order_constraint(
+                        element
+                    )
                     if filtered is not None:
                         elements.append(filtered)
                     if order_candidate:
                         order_field = order_candidate
+                        order_field_negated = order_candidate_negated
 
                 if len(elements) == 0:
-                    return None, order_field
+                    return None, order_field, order_field_negated
                 if len(elements) == 1:
-                    return elements[0], order_field
-                return ORList(elements), order_field
+                    return elements[0], order_field, order_field_negated
+                return ORList(elements), order_field, order_field_negated
 
             if isinstance(node, Not):
-                filtered, order_field = _extract_order_constraint(node.child)
+                filtered, order_field, child_order_negated = _extract_order_constraint(
+                    node.child,
+                    not order_negated,
+                )
                 if filtered is None:
-                    return None, order_field
-                return Not(filtered), order_field
+                    return None, order_field, child_order_negated
+                return Not(filtered), order_field, child_order_negated
 
-            return node, None
+            return node, None, False
 
         def _parse_field_selector(value: str) -> tuple[str, int | None]:
             match = re.fullmatch(r"(?P<field>.+?)(?:#(?P<index>[1-9]\d*))?", value.strip())
@@ -1300,7 +1310,7 @@ class Library:
                 statement = select(Entry.id)
 
             ast = search.ast
-            filter_ast, order_field_key = _extract_order_constraint(ast)
+            filter_ast, order_field_key, order_field_negated = _extract_order_constraint(ast)
 
             if not search.show_hidden_entries:
                 statement = statement.where(~Entry.tags.any(Tag.is_hidden))
@@ -1356,6 +1366,12 @@ class Library:
                         resolved_order_field_keys = candidate_keys
 
             if resolved_order_field_keys:
+                # `NOT order:...` reverses field-order direction only for entries where
+                # the order field produced a sortable value. Fallback entries are unaffected.
+                effective_order_ascending = search.ascending
+                if order_field_negated:
+                    effective_order_ascending = not effective_order_ascending
+
                 if order_field_occurrence is None:
                     text_filters = [
                         TextField.type_key.in_(resolved_order_field_keys),
@@ -1467,7 +1483,7 @@ class Library:
                 # Entries with values for the requested order field are sorted first.
                 statement = statement.order_by(case((has_order_value, 0), else_=1))
                 statement = statement.order_by(
-                    asc(order_value) if search.ascending else desc(order_value)
+                    asc(order_value) if effective_order_ascending else desc(order_value)
                 )
 
             statement = statement.order_by(asc(sort_on) if search.ascending else desc(sort_on))

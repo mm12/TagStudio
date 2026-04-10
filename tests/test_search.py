@@ -217,3 +217,45 @@ def test_order_constraint_with_field_value_match(library: Library):
 
     assert results.total_count >= 2
     assert results.ids[0] == first_id
+
+
+def test_not_order_constraint_reverses_only_field_sorted_subset(library: Library):
+    from pathlib import Path
+
+    from tagstudio.core.library.alchemy.models import Entry
+    from tagstudio.core.utils.types import unwrap
+
+    folder = unwrap(library.folder)
+    extra_entry = Entry(
+        folder=folder,
+        path=Path("fallback_note_missing.jpg"),
+        fields=library.default_fields,
+    )
+    assert library.add_entries([extra_entry])
+
+    entries = list(library.all_entries(with_joins=True))
+    assert len(entries) >= 3
+    first_id = entries[0].id
+    second_id = entries[1].id
+    third_id = entries[2].id
+
+    assert library.add_value_type("note", name="Note")
+    assert library.add_field_to_entry(first_id, field_id="note", value="alpha")
+    assert library.add_field_to_entry(second_id, field_id="note", value="zulu")
+    # third entry intentionally has no note field (fallback group)
+
+    asc_state = BrowsingState.from_search_query('order:"note=*"').with_sorting_direction(True)
+    asc_results = library.search_library(asc_state, page_size=500)
+
+    not_order_state = BrowsingState.from_search_query('not order:"note=*"').with_sorting_direction(True)
+    not_order_results = library.search_library(not_order_state, page_size=500)
+
+    # The subset with note values is reversed.
+    assert asc_results.ids[0] == first_id
+    assert asc_results.ids[1] == second_id
+    assert not_order_results.ids[0] == second_id
+    assert not_order_results.ids[1] == first_id
+
+    # Fallback entries stay in fallback group and are not part of the reversal operation.
+    assert third_id in asc_results.ids[2:]
+    assert third_id in not_order_results.ids[2:]
