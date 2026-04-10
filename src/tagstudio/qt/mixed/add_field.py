@@ -86,6 +86,8 @@ class AddFieldModal(QWidget):
         self.list_widget.setCurrentRow(0)
 
         super().show()
+        self.raise_()
+        self.activateWindow()
 
     @override
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:  # noqa N802
