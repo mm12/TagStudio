@@ -299,7 +299,7 @@ class FieldContainers(QWidget):
 
             if not is_mixed:
                 container.set_search_callback(
-                    lambda f=field: self.search_for_field(f)
+                    lambda checked=False, f=field: self.search_for_field(f)
                 )
                 edit_modal = PanelModal(
                     EditText(field.name, field.value, field.is_multiline),
@@ -367,7 +367,7 @@ class FieldContainers(QWidget):
             inner_widget = TextContainerWidget(title, field.name)
             container.set_inner_widget(inner_widget)
             container.set_search_callback(
-                lambda f=field: self.search_for_field(f)
+                lambda checked=False, f=field: self.search_for_field(f)
             )
             container.set_remove_callback(
                 lambda: self.remove_message_box(
@@ -494,10 +494,33 @@ class FieldContainers(QWidget):
             callback()
 
     def search_for_field(self, field: BaseField) -> None:
-        """Build a field query from the current field and execute it."""
+        """Build a field query from the current field and execute it.
+
+        Modifier behavior:
+        - Shift: append (otherwise replace)
+        - Ctrl: negate the field clause
+        - Alt: use OR when appending (otherwise default AND behavior)
+        """
         raw_value = "" if field.value is None else str(field.value)
         escaped = raw_value.replace("\\", "\\\\").replace('"', '\\"')
-        query = f'field:"{field.type_key}={escaped}"'
+        field_query = f'field:"{field.type_key}={escaped}"'
+
+        modifiers = QGuiApplication.keyboardModifiers()
+        has_shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        has_ctrl = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        has_alt = bool(modifiers & Qt.KeyboardModifier.AltModifier)
+        existing_query = self.driver.main_window.search_field.text().strip()
+
+        clause = f"NOT {field_query}" if has_ctrl else field_query
+
+        if has_shift:
+            if existing_query:
+                separator = " OR " if has_alt else " "
+                query = f"{existing_query}{separator}{clause}"
+            else:
+                query = clause
+        else:
+            query = clause
 
         self.driver.main_window.search_field.setText(query)
         current = self.driver.browsing_history.current
