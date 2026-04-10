@@ -5,7 +5,8 @@
 from typing import TYPE_CHECKING, override
 
 import structlog
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QGuiApplication
 
 from tagstudio.core.enums import TagClickActionOption
 from tagstudio.core.library.alchemy.enums import BrowsingState
@@ -93,7 +94,25 @@ class TagBoxWidget(TagBoxWidgetView):
 
     @override
     def _on_search(self, tag: Tag) -> None:  # type: ignore[misc]
-        self.__driver.main_window.search_field.setText(f"tag_id:{tag.id}")
-        self.__driver.update_browsing_state(
-            BrowsingState.from_tag_id(tag.id, self.__driver.browsing_history.current)
-        )
+        tag_query = f"tag_id:{tag.id}"
+
+        modifiers = QGuiApplication.keyboardModifiers()
+        has_shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        has_ctrl = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        has_alt = bool(modifiers & Qt.KeyboardModifier.AltModifier)
+
+        clause = f"NOT {tag_query}" if has_ctrl else tag_query
+        existing_query = self.__driver.main_window.search_field.text().strip()
+
+        if has_shift:
+            if existing_query:
+                separator = " OR " if has_alt else " "
+                query = f"{existing_query}{separator}{clause}"
+            else:
+                query = clause
+        else:
+            query = clause
+
+        self.__driver.main_window.search_field.setText(query)
+        current = self.__driver.browsing_history.current
+        self.__driver.update_browsing_state(current.with_search_query(query))
