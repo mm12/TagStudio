@@ -56,6 +56,7 @@ class FieldContainer(QWidget):
         self.title: str = title
         self.inline: bool = inline
         self.copy_callback: Callable[[], None] | None = None
+        self.search_callback: Callable[[], None] | None = None
         self.edit_callback: Callable[[], None] | None = None
         self.remove_callback: Callable[[], None] | None = None
         button_size = 24
@@ -98,6 +99,16 @@ class FieldContainer(QWidget):
         self.copy_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.title_layout.addWidget(self.copy_button)
         self.copy_button.setHidden(True)
+
+        self.search_button = QPushButton("Find")
+        self.search_button.setObjectName("searchButton")
+        self.search_button.setMinimumSize(button_size + 10, button_size)
+        self.search_button.setMaximumSize(button_size + 10, button_size)
+        self.search_button.setFlat(True)
+        self.search_button.setToolTip("Add field to search")
+        self.search_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.title_layout.addWidget(self.search_button)
+        self.search_button.setHidden(True)
 
         self.edit_button = QPushButton()
         self.edit_button.setObjectName("editButton")
@@ -146,6 +157,14 @@ class FieldContainer(QWidget):
         if callback:
             self.edit_button.clicked.connect(callback)
 
+    def set_search_callback(self, callback: Callable[[], None] | None = None) -> None:
+        with catch_warnings(record=True):
+            self.search_button.clicked.disconnect()
+
+        self.search_callback = callback
+        if callback:
+            self.search_button.clicked.connect(callback)
+
     def set_remove_callback(self, callback: Callable[[], None] | None = None) -> None:
         with catch_warnings(record=True):
             self.remove_button.clicked.disconnect()
@@ -179,6 +198,8 @@ class FieldContainer(QWidget):
         # NOTE: You could pass the hover event to the FieldWidget if needed.
         if self.copy_callback:
             self.copy_button.setHidden(False)
+        if self.search_callback:
+            self.search_button.setHidden(False)
         if self.edit_callback:
             self.edit_button.setHidden(False)
         if self.remove_callback:
@@ -189,6 +210,8 @@ class FieldContainer(QWidget):
     def leaveEvent(self, event: QEvent) -> None:
         if self.copy_callback:
             self.copy_button.setHidden(True)
+        if self.search_callback:
+            self.search_button.setHidden(True)
         if self.edit_callback:
             self.edit_button.setHidden(True)
         if self.remove_callback:

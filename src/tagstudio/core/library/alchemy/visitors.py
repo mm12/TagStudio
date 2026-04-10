@@ -37,6 +37,7 @@ else:
 logger = structlog.get_logger(__name__)
 
 _DATE_DURATION_PATTERN = re.compile(r"^(?P<amount>\d+)\s*(?P<unit>[a-zA-Z]+)$")
+_FIELD_SELECTOR_PATTERN = re.compile(r"^(?P<field>.+?)(?:#(?P<index>[1-9]\d*))?$")
 _DATE_DURATION_UNITS_TO_DAYS: dict[str, int] = {
     "d": 1,
     "day": 1,
@@ -87,7 +88,7 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
     @override
     def visit_constraint(self, node: Constraint) -> ColumnElement[bool]:  # type: ignore
         """Returns a Boolean Expression that is true, if the Entry satisfies the constraint."""
-        if len(node.properties) != 0:
+        if len(node.properties) != 0 and node.type != ConstraintType.Field:
             raise NotImplementedError("Properties are not implemented yet")  # TODO TSQLANG
 
         if node.type == ConstraintType.Tag:
@@ -233,39 +234,75 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
             return true()
 
         elif node.type == ConstraintType.Field:
-            # Field search format: field:field_name=search_term or field:field_name:search_term
-            # Parse the field name and search term
-            field_spec = node.value
-            
-            # Try to split on '=' first, then fallback to ':'
-            if '=' in field_spec:
-                parts = field_spec.split('=', 1)
-            else:
-                parts = field_spec.split(':', 1)
-            
-            if len(parts) != 2:
-                logger.error("Invalid field search format", value=node.value)
-                raise NotImplementedError(
-                    "Field search requires format: field:field_name=search_term"
+            field_name_raw, search_term = self.__split_field_search_spec(node.value)
+            field_name, field_occurrence_index = self.__parse_field_selector(field_name_raw)
+
+            explicit_occurrence_prop: int | None = None
+            for prop in node.properties:
+                if prop.key.lower() in ("index", "occurrence"):
+                    try:
+                        explicit_occurrence_prop = int(prop.value)
+                    except ValueError as exc:
+                        raise NotImplementedError("Field index must be a positive integer") from exc
+            if explicit_occurrence_prop is not None:
+                field_occurrence_index = explicit_occurrence_prop
+
+            if field_occurrence_index is not None and field_occurrence_index < 1:
+                raise NotImplementedError("Field index must be >= 1")
+
+            normalized_field_name = self.__normalize_field_lookup(field_name)
+            matching_keys = select(ValueType.key).where(
+                or_(
+                    func.lower(ValueType.key) == normalized_field_name,
+                    func.lower(ValueType.name) == field_name.strip().lower(),
+                    func.lower(func.replace(ValueType.name, " ", "_")) == normalized_field_name,
                 )
-            
-            field_name, search_term = parts
-            field_name = field_name.strip()
-            search_term = search_term.strip()
-            
-            # Query for TextField entries matching the field name and search term
-            text_field_query = select(TextField.entry_id).where(
-                TextField.type_key.ilike(field_name),
-                TextField.value.ilike(f"%{search_term}%")
             )
-            
-            # When searching datetime fields without a specific filter, match any datetime field with the name
-            datetime_field_query = select(DatetimeField.entry_id).where(
-                DatetimeField.type_key.ilike(field_name)
+
+            ranked_text = (
+                select(
+                    TextField.entry_id.label("entry_id"),
+                    TextField.value.label("value"),
+                    func.row_number()
+                    .over(
+                        partition_by=(TextField.entry_id, TextField.type_key),
+                        order_by=(TextField.position.asc(), TextField.id.asc()),
+                    )
+                    .label("row_num"),
+                )
+                .where(TextField.type_key.in_(matching_keys))
+                .subquery()
             )
-            
-            # Return entries that have matching fields
-            return Entry.id.in_(text_field_query.union(datetime_field_query))
+
+            ranked_datetime = (
+                select(
+                    DatetimeField.entry_id.label("entry_id"),
+                    DatetimeField.value.label("value"),
+                    func.row_number()
+                    .over(
+                        partition_by=(DatetimeField.entry_id, DatetimeField.type_key),
+                        order_by=(DatetimeField.position.asc(), DatetimeField.id.asc()),
+                    )
+                    .label("row_num"),
+                )
+                .where(DatetimeField.type_key.in_(matching_keys))
+                .subquery()
+            )
+
+            text_stmt = select(ranked_text.c.entry_id).where(
+                self.__string_match_expression(ranked_text.c.value, search_term)
+            )
+            datetime_stmt = select(ranked_datetime.c.entry_id).where(
+                self.__string_match_expression(ranked_datetime.c.value, search_term)
+            )
+
+            if field_occurrence_index is not None:
+                text_stmt = text_stmt.where(ranked_text.c.row_num == field_occurrence_index)
+                datetime_stmt = datetime_stmt.where(
+                    ranked_datetime.c.row_num == field_occurrence_index
+                )
+
+            return Entry.id.in_(text_stmt.union(datetime_stmt))
 
         # raise exception if Constraint stays unhandled
         raise NotImplementedError("This type of constraint is not implemented yet")
@@ -366,3 +403,40 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
         return Entry.id.in_(
             select(TagEntry.entry_id).where(TagEntry.tag_id.in_(tag_ids)).distinct()
         )
+
+    def __split_field_search_spec(self, value: str) -> tuple[str, str]:
+        if "=" in value:
+            field_name, search_term = value.split("=", 1)
+            return field_name.strip(), search_term.strip()
+
+        if ":" in value:
+            field_name, search_term = value.split(":", 1)
+            return field_name.strip(), search_term.strip()
+
+        # `field:"name"` means "any non-empty value for this field".
+        return value.strip(), "*"
+
+    def __parse_field_selector(self, value: str) -> tuple[str, int | None]:
+        match = _FIELD_SELECTOR_PATTERN.fullmatch(value.strip())
+        if match is None:
+            return value.strip(), None
+
+        field_name = (match.group("field") or "").strip()
+        index_text = match.group("index")
+        return field_name, int(index_text) if index_text is not None else None
+
+    def __normalize_field_lookup(self, value: str) -> str:
+        return value.strip().lower().replace(" ", "_")
+
+    def __string_match_expression(self, value_column: ColumnElement, search_term: str) -> ColumnElement[bool]:  # type: ignore
+        normalized = search_term.strip()
+
+        if normalized == "*":
+            return and_(value_column.is_not(None), func.trim(value_column) != "")
+
+        if "*" in normalized or "?" in normalized:
+            if normalized == normalized.lower():
+                return func.lower(value_column).op("GLOB")(normalized.lower())
+            return value_column.op("GLOB")(normalized)
+
+        return ilike_op(value_column, f"%{normalized}%")

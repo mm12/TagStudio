@@ -1399,7 +1399,7 @@ class QtDriver(DriverMixin, QObject):
 
     def update_completions_list(self, text: str) -> None:
         matches = re.search(
-            r"((?:.* )?)(mediatype|filetype|path|tag|tag_id|order):(\"?[A-Za-z0-9_\ \t-]+\"?)?",
+            r"((?:.* )?)(mediatype|filetype|path|tag|tag_id|order|field):(\"?[A-Za-z0-9_\ \t#=:\\*\?-]+\"?)?",
             text,
         )
 
@@ -1412,6 +1412,7 @@ class QtDriver(DriverMixin, QObject):
                 "tag:",
                 "tag_id:",
                 "order:",
+                "field:",
                 "special:untagged",
                 "special:empty_fields",
             ]
@@ -1462,6 +1463,18 @@ class QtDriver(DriverMixin, QObject):
             completion_list = list(
                 map(lambda x: prefix + "filetype:" + x.replace(".", ""), extensions_list)
             )
+        elif query_type == "field":
+            completion_list = []
+            for value_type in self.lib.field_types.values():
+                completion_list.extend(
+                    [
+                        f'{prefix}field:"{value_type.key}=*"',
+                        f'{prefix}field:"{value_type.key}#2=*"',
+                        f'{prefix}order:{value_type.key}',
+                        f'{prefix}order:{value_type.key}#2',
+                        f'{prefix}order:"{value_type.key}=*!*"',
+                    ]
+                )
 
         update_completion_list: bool = (
             completion_list != self.main_window.search_field_completion_list.stringList()

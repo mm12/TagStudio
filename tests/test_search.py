@@ -5,7 +5,6 @@
 
 import pytest
 import structlog
-from pathlib import Path
 
 from tagstudio.core.library.alchemy.enums import BrowsingState
 from tagstudio.core.library.alchemy.library import Library
@@ -161,77 +160,61 @@ def test_date_constraint_accepts_generic_relative_duration(search_library: Libra
     assert isinstance(results.total_count, int)
 
 
-def test_field_search_basic(library: Library):
-    # Test field search with a created library
-    from tagstudio.core.library.alchemy.models import Entry
-    from tagstudio.core.library.alchemy.fields import TextField
-    
-    folder = next(library.all_folders())
-    
-    # Create entries with text fields
-    entry1 = Entry(
-        folder=folder,
-        path=Path("test1.jpg"),
-        fields=library.default_fields,
-    )
-    entry2 = Entry(
-        folder=folder,
-        path=Path("test2.jpg"),
-        fields=library.default_fields,
-    )
-    entry3 = Entry(
-        folder=folder,
-        path=Path("test3.jpg"),
-        fields=library.default_fields,
-    )
-    
-    assert library.add_entries([entry1, entry2, entry3])
-    
-    # Add field values to entries
-    # Set title field for entry1
-    from sqlalchemy.orm import Session
-    with Session(library.engine) as session:
-        title_field_type = session.query(library.models.ValueType).filter_by(key="title").first()
-        if title_field_type:
-            field1 = TextField(
-                type_key="title",
-                value="My Awesome Photo",
-                entry_id=entry1.id,
-                position=0
-            )
-            field2 = TextField(
-                type_key="title",
-                value="Another Photo",
-                entry_id=entry2.id,
-                position=0
-            )
-            field3 = TextField(
-                type_key="title",
-                value="My Awesome Art",
-                entry_id=entry3.id,
-                position=0
-            )
-            session.add_all([field1, field2, field3])
-            session.commit()
-    
-    # Query: search for "Awesome" in title field
-    results = library.search_library(
-        BrowsingState.from_search_query("field:title=Awesome"), 
-        page_size=500
-    )
-    # Should find entry1 and entry3
-    assert results.total_count == 2
+def test_field_search_with_selector_and_wildcard(library: Library):
+    entries = list(library.all_entries(with_joins=True))
+    assert len(entries) >= 2
+    first_id = entries[0].id
+    second_id = entries[1].id
+
+    assert library.add_value_type("note", name="Note")
+    assert library.add_field_to_entry(first_id, field_id="note", value="25 pages")
+    assert library.add_field_to_entry(first_id, field_id="note", value="misc")
+    assert library.add_field_to_entry(second_id, field_id="note", value="misc")
+
+    # Plain contains search.
+    verify_count(library, 'field:"note=25 pages"', 1)
+
+    # Wildcard search over field value.
+    verify_count(library, 'field:"note=25*"', 1)
+
+    # Any non-empty value for this field.
+    verify_count(library, 'field:"note=*"', 2)
+
+    # Restrict to the second occurrence of the field inside each entry.
+    verify_count(library, 'field:"note#2=misc"', 1)
 
 
-@pytest.mark.parametrize(
-    ["query", "count"],
-    [
-        # Basic field search tests with special syntax
-        # Empty search term should return nothing
-        ("field:unknown_field=test", 0),
-    ],
-)
-def test_field_search_syntax(search_library: Library, query: str, count: int):
-    # Test that field search constraint is properly parsed without errors
-    results = search_library.search_library(BrowsingState.from_search_query(query), page_size=500)
-    assert isinstance(results.total_count, int)
+def test_order_constraint_with_field_selector(library: Library):
+    entries = list(library.all_entries(with_joins=True))
+    assert len(entries) >= 2
+    first_id = entries[0].id
+    second_id = entries[1].id
+
+    assert library.add_value_type("artist", name="Artist")
+    assert library.add_field_to_entry(first_id, field_id="artist", value="twitter@alice")
+    assert library.add_field_to_entry(first_id, field_id="artist", value="twitter@!111")
+    assert library.add_field_to_entry(second_id, field_id="artist", value="twitter@bob")
+
+    results = library.search_library(BrowsingState.from_search_query("order:artist#2"), page_size=500)
+    assert results.total_count >= 2
+    assert results.ids[0] == first_id
+
+
+def test_order_constraint_with_field_value_match(library: Library):
+    entries = list(library.all_entries(with_joins=True))
+    assert len(entries) >= 2
+    first_id = entries[0].id
+    second_id = entries[1].id
+
+    assert library.add_value_type("artist", name="Artist")
+    assert library.add_field_to_entry(first_id, field_id="artist", value="twitter@alice")
+    assert library.add_field_to_entry(first_id, field_id="artist", value="twitter@!111")
+    assert library.add_field_to_entry(second_id, field_id="artist", value="twitter@bob")
+
+    # Only values containing '!' participate in order field sorting.
+    # Entries with matching values are sorted first.
+    state = BrowsingState.from_search_query('order:"artist=*!*"').with_sorting_direction(True)
+    results = library.search_library(state, page_size=500)
+
+    assert results.total_count >= 2
+    assert results.ids[0] == first_id

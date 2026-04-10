@@ -273,6 +273,9 @@ class FieldContainers(QWidget):
             inner_widget = TextWidget(title, text)
             container.set_inner_widget(inner_widget)
             if not is_mixed:
+                container.set_search_callback(
+                    lambda f=field: self.search_for_field(f)
+                )
                 modal = PanelModal(
                     EditTextLine(field.value),
                     title=title,
@@ -298,6 +301,8 @@ class FieldContainers(QWidget):
                         ),
                     )
                 )
+            else:
+                container.set_search_callback()
 
         elif field.type.type == FieldTypeEnum.TEXT_BOX:
             container.set_title(field.type.name)
@@ -314,6 +319,9 @@ class FieldContainers(QWidget):
             inner_widget = TextWidget(title, text)
             container.set_inner_widget(inner_widget)
             if not is_mixed:
+                container.set_search_callback(
+                    lambda f=field: self.search_for_field(f)
+                )
                 modal = PanelModal(
                     EditTextBox(field.value),
                     title=title,
@@ -335,6 +343,8 @@ class FieldContainers(QWidget):
                         ),
                     )
                 )
+            else:
+                container.set_search_callback()
 
         elif field.type.type == FieldTypeEnum.DATETIME:
             logger.info("[FieldContainers][write_container] Datetime Field", field=field)
@@ -354,6 +364,9 @@ class FieldContainers(QWidget):
 
                 inner_widget = TextWidget(title, text)
                 container.set_inner_widget(inner_widget)
+                container.set_search_callback(
+                    lambda f=field: self.search_for_field(f)
+                )
 
                 modal = PanelModal(
                     DatetimePicker(self.driver, field.value or dt.now()),
@@ -381,6 +394,7 @@ class FieldContainers(QWidget):
                 title = f"{field.type.name} (Wacky Date)"
                 inner_widget = TextWidget(title, text)
                 container.set_inner_widget(inner_widget)
+                container.set_search_callback()
         else:
             logger.warning("[FieldContainers][write_container] Unknown Field", field=field)
             container.set_title(field.type.name)
@@ -388,6 +402,9 @@ class FieldContainers(QWidget):
             title = f"{field.type.name} (Unknown Field Type)"
             inner_widget = TextWidget(title, field.type.name)
             container.set_inner_widget(inner_widget)
+            container.set_search_callback(
+                lambda f=field: self.search_for_field(f)
+            )
             container.set_remove_callback(
                 lambda: self.remove_message_box(
                     prompt=self.remove_field_prompt(field.type.name),
@@ -449,6 +466,7 @@ class FieldContainers(QWidget):
             container.set_inner_widget(inner_widget)
 
         container.set_edit_callback()
+        container.set_search_callback()
         container.set_remove_callback()
         container.setHidden(False)
 
@@ -491,3 +509,13 @@ class FieldContainers(QWidget):
         result = remove_mb.exec_()
         if result == QMessageBox.ButtonRole.ActionRole.value:
             callback()
+
+    def search_for_field(self, field: BaseField) -> None:
+        """Build a field query from the current field and execute it."""
+        raw_value = "" if field.value is None else str(field.value)
+        escaped = raw_value.replace("\\", "\\\\").replace('"', '\\"')
+        query = f'field:"{field.type_key}={escaped}"'
+
+        self.driver.main_window.search_field.setText(query)
+        current = self.driver.browsing_history.current
+        self.driver.update_browsing_state(current.with_search_query(query))
