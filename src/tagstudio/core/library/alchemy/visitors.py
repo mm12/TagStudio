@@ -96,50 +96,49 @@ class SQLBoolExpressionBuilder(BaseVisitor[ColumnElement[bool]]):
         elif node.type == ConstraintType.TagID:
             return self.__entry_has_any_tags([int(node.value)])
         elif node.type == ConstraintType.Path:
+            path_value = node.value
             ilike = False
             glob = False
             regex = False
 
             # Smartcase check
-            if node.value == node.value.lower():
+            if path_value == path_value.lower():
                 ilike = True
-            if node.value.startswith("*") or node.value.endswith("*"):
+            if path_value.startswith("*") or path_value.endswith("*"):
                 glob = True
-            if node.value.startswith("/") or node.value.endswith("/"):
+            if len(path_value) >= 2 and path_value.startswith("/") and path_value.endswith("/"):
                 regex = True
 
-            if ilike and glob:
-                logger.info("ConstraintType.Path", ilike=True, glob=True)
-                return func.lower(Entry.path).op("GLOB")(f"{node.value.lower()}")
-            elif ilike:
-                logger.info("ConstraintType.Path", ilike=True, glob=False)
-                return ilike_op(Entry.path, f"%{node.value}%")
-            elif glob:
-                logger.info("ConstraintType.Path", ilike=False, glob=True)
-                return Entry.path.op("GLOB")(node.value)
-            elif regex:
+            if regex:
+                regex_pattern = path_value[1:-1]
                 # search using raw regex. Unlike the final `else`, we do not turn `\s` into `/s`
-                # remove starting and ending slashes
-                # BUG: sometimes `glob=False ilike=True` gets used when it shouldn't!
-                node.value = node.value.strip("/")
                 # Validate regex to avoid SQLite UDF exceptions from invalid patterns
                 try:
-                    re.compile(node.value)
-                    logger.info("ConstraintType.Path", ilike=False, glob=False, re=node.value)
-                    return Entry.path.regexp_match(node.value)
+                    re.compile(regex_pattern)
+                    logger.info("ConstraintType.Path", ilike=False, glob=False, re=regex_pattern)
+                    return Entry.path.regexp_match(regex_pattern)
                 except re.error as exc:
                     logger.error(
                         "Invalid regex in path constraint; falling back to substring match",
-                        pattern=node.value,
+                        pattern=regex_pattern,
                         error=str(exc),
                     )
                     # Fallback: substring match (case-insensitive) to avoid hard failure
-                    return ilike_op(Entry.path, f"%{node.value}%")
+                    return ilike_op(Entry.path, f"%{regex_pattern}%")
+            elif ilike and glob:
+                logger.info("ConstraintType.Path", ilike=True, glob=True)
+                return func.lower(Entry.path).op("GLOB")(f"{path_value.lower()}")
+            elif ilike:
+                logger.info("ConstraintType.Path", ilike=True, glob=False)
+                return ilike_op(Entry.path, f"%{path_value}%")
+            elif glob:
+                logger.info("ConstraintType.Path", ilike=False, glob=True)
+                return Entry.path.op("GLOB")(path_value)
             else:
                 logger.info(
-                    "ConstraintType.Path", ilike=False, glob=False, re=re.escape(node.value)
+                    "ConstraintType.Path", ilike=False, glob=False, re=re.escape(path_value)
                 )
-                return Entry.path.regexp_match(re.escape(node.value))
+                return Entry.path.regexp_match(re.escape(path_value))
         elif node.type == ConstraintType.MediaType:
             extensions: set[str] = set[str]()
             for media_cat in MediaCategories.ALL_CATEGORIES:
