@@ -3,11 +3,13 @@
 # Created for TagStudio: https://github.com/CyanVoxel/TagStudio
 
 
+import base64
 import contextlib
 import hashlib
 import math
 import os
 import sqlite3
+import struct
 import tarfile
 import xml.etree.ElementTree as ET
 import zipfile
@@ -1568,7 +1570,7 @@ class ThumbRenderer(QObject):
         """Render a thumbnail or preview image.
 
         Args:
-            timestamp (float): The timestamp for which this this job was dispatched.
+            timestamp (float): The timestamp for which this job was dispatched.
             filepath (str | Path): The path of the file to render a thumbnail for.
             base_size (tuple[int,int]): The unmodified base size of the thumbnail.
             pixel_ratio (float): The screen pixel ratio.
@@ -1681,7 +1683,7 @@ class ThumbRenderer(QObject):
                     save_to_file=file_name,
                 )
 
-            # If the normal renderer failed, fallback the the defaults
+            # If the normal renderer failed, fallback the defaults
             # (with native non-cached sizing!)
             if not image:
                 image = (
@@ -1778,7 +1780,7 @@ class ThumbRenderer(QObject):
         """Render a thumbnail or preview image.
 
         Args:
-            timestamp (float): The timestamp for which this this job was dispatched.
+            timestamp (float): The timestamp for which this job was dispatched.
             filepath (str | Path): The path of the file to render a thumbnail for.
             base_size (tuple[int,int]): The unmodified base size of the thumbnail.
             pixel_ratio (float): The screen pixel ratio.
