@@ -478,7 +478,8 @@ class MainMenuBar(QMenuBar):
 # View Component
 class MainWindow(QMainWindow):
     THUMB_SIZES: list[tuple[str, int]] = [
-        (Translations["home.thumbnail_size.extra_large"], 512),
+        (Translations["home.thumbnail_size.xx_large"], 512),
+        (Translations["home.thumbnail_size.extra_large"], 256),
         (Translations["home.thumbnail_size.large"], 192),
         (Translations["home.thumbnail_size.medium"], 128),
         (Translations["home.thumbnail_size.small"], 96),
@@ -656,7 +657,7 @@ class MainWindow(QMainWindow):
         self.sorting_direction_combobox.addItem(
             Translations["sorting.direction.descending"], userData=False
         )
-        self.sorting_direction_combobox.setCurrentIndex(1)  # Default: Descending
+        self.sorting_direction_combobox.setCurrentIndex(0)  # Default: Ascending
         self.extra_input_layout.addWidget(self.sorting_direction_combobox)
 
         ## Thumbnail Size placeholder
@@ -674,7 +675,7 @@ class MainWindow(QMainWindow):
         self.extra_input_layout.addWidget(self.thumb_size_combobox)
         for size in MainWindow.THUMB_SIZES:
             self.thumb_size_combobox.addItem(size[0], size[1])
-        self.thumb_size_combobox.setCurrentIndex(2)  # Default: Medium
+        self.thumb_size_combobox.setCurrentIndex(0)  # Default: XXL
 
         self.central_layout.addLayout(self.extra_input_layout, 5, 0, 1, 1)
 
@@ -689,7 +690,8 @@ class MainWindow(QMainWindow):
         self.setup_entry_list(driver)
         self.setup_preview_panel(driver)
 
-        self.content_splitter.setStretchFactor(1, 10)
+        self.content_splitter.setStretchFactor(0, 5)
+        self.content_splitter.setStretchFactor(1, 20)
         self.content_layout.addWidget(self.content_splitter)
 
         self.central_layout.addLayout(self.content_layout, 10, 0, 1, 1)
@@ -713,7 +715,7 @@ class MainWindow(QMainWindow):
         self.thumb_grid = QWidget()
         self.thumb_grid.setObjectName("thumb_grid")
         self.thumb_layout = ThumbGridLayout(driver, self.entry_scroll_area)
-        self.thumb_layout.setSpacing(min(self.thumb_size // 10, 12))
+        self.thumb_layout.setSpacing(min(self.thumb_size // 10, 14))
         self.thumb_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.thumb_grid.setLayout(self.thumb_layout)
         self.entry_scroll_area.setWidget(self.thumb_grid)

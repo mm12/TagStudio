@@ -715,7 +715,7 @@ class QtDriver(DriverMixin, QObject):
         )
 
         # Thumbnail Size ComboBox
-        self.main_window.thumb_size_combobox.setCurrentIndex(2)  # Default: Medium
+        self.main_window.thumb_size_combobox.setCurrentIndex(0)  # Default: XXL
         self.main_window.thumb_size_combobox.currentIndexChanged.connect(
             lambda: self.thumb_size_callback(self.main_window.thumb_size_combobox.currentIndex())
         )
