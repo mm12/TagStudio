@@ -79,7 +79,7 @@ class BrowsingState:
 
     page_index: int = 0
     page_positions: dict[int, int] = field(default_factory=dict)
-    sorting_mode: SortingModeEnum = SortingModeEnum.DATE_ADDED
+    sorting_mode: SortingModeEnum = SortingModeEnum.PATH # SortingModeEnum.DATE_ADDED
     ascending: bool = False
     random_seed: float = 0
 

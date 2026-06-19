@@ -166,7 +166,7 @@ def qt_driver(library: Library, library_dir: Path):
 
         driver.app = Mock()
         driver.main_window = Mock()
-        driver.main_window.thumb_size = 128
+        driver.main_window.thumb_size = 512
         driver.main_window.thumb_layout = ThumbGridLayout(driver, QScrollArea())
         driver.main_window.menu_bar.autofill_action = Mock()
 
