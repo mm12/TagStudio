@@ -676,10 +676,13 @@ class MainWindow(QMainWindow):
         for size in MainWindow.THUMB_SIZES:
             self.thumb_size_combobox.addItem(size[0], size[1])
         self.thumb_size_combobox.setCurrentIndex(0)  # Default: XXL
+        # TODO: this doesn't set the spacing between thumbs, only the size of the thumb itself. Meaning they overlap!
 
         self.central_layout.addLayout(self.extra_input_layout, 5, 0, 1, 1)
 
     def setup_content(self, driver: "QtDriver"):
+        pane1_ratio = 0.20
+        pane2_ratio = 0.80
         self.content_layout = QHBoxLayout()
         self.content_layout.setObjectName("content_layout")
 
@@ -690,7 +693,21 @@ class MainWindow(QMainWindow):
         self.setup_entry_list(driver)
         self.setup_preview_panel(driver)
 
-        self.content_splitter.setStretchFactor(0, 5)
+        total_width = self.content_splitter.sizeHint().width()
+
+        init_sizes = [
+          max(
+              int(total_width * pane1_ratio),
+              self.thumb_size 
+                + self.content_splitter.handleWidth()
+                + self.thumb_size // 10
+              ),
+          int(total_width * pane2_ratio)
+        ]
+
+        self.content_splitter.setSizes(init_sizes)
+
+        self.content_splitter.setStretchFactor(0, 0)
         self.content_splitter.setStretchFactor(1, 20)
         self.content_layout.addWidget(self.content_splitter)
 
@@ -715,7 +732,7 @@ class MainWindow(QMainWindow):
         self.thumb_grid = QWidget()
         self.thumb_grid.setObjectName("thumb_grid")
         self.thumb_layout = ThumbGridLayout(driver, self.entry_scroll_area)
-        self.thumb_layout.setSpacing(min(self.thumb_size // 10, 14))
+        self.thumb_layout.setSpacing(self.thumb_size // 10)
         self.thumb_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.thumb_grid.setLayout(self.thumb_layout)
         self.entry_scroll_area.setWidget(self.thumb_grid)
