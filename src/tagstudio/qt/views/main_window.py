@@ -732,7 +732,7 @@ class MainWindow(QMainWindow):
         self.thumb_grid = QWidget()
         self.thumb_grid.setObjectName("thumb_grid")
         self.thumb_layout = ThumbGridLayout(driver, self.entry_scroll_area)
-        self.thumb_layout.setSpacing(self.thumb_size // 10)
+        self.thumb_layout.setSpacing(min(self.thumb_size // 10, 14))
         self.thumb_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.thumb_grid.setLayout(self.thumb_layout)
         self.entry_scroll_area.setWidget(self.thumb_grid)

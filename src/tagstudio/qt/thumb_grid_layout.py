@@ -145,7 +145,7 @@ class ThumbGridLayout(QLayout):
         if w := getattr(self.driver, "main_window", None):
             base_size = (w.thumb_size, w.thumb_size)
         else:
-            base_size = (128, 128)
+            base_size = (512, 512) # Bug: this causes issues since it doesn't read from defaults and is hardcoded
         while index >= len(self._item_thumbs):
             show_filename = self.driver.settings.show_filenames_in_grid
             item = ItemThumb(
